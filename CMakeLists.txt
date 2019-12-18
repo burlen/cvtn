@@ -39,8 +39,11 @@ message(STATUS "CMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
 
 find_package(VTK COMPONENTS CommonCore CommonDataModel IOCore IOLegacy IOParallelXML REQUIRED)
 find_package(HDF5 COMPONENTS C HL REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(TBB REQUIRED tbb)
 
 add_executable(cvt cvt.cpp)
-target_link_libraries(cvt ${HDF5_HL_LIBRARIES} ${HDF5_C_LIBRARIES} ${VTK_LIBRARIES})
+target_link_libraries(cvt ${TBB_LIBRARIES}
+    ${HDF5_HL_LIBRARIES} ${HDF5_C_LIBRARIES} ${VTK_LIBRARIES})
 
 vtk_module_autoinit(TARGETS cvt MODULES ${VTK_LIBRARIES})

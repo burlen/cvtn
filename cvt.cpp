@@ -1,9 +1,9 @@
-
 #include <cstring>
 #include <iostream>
 
-#include "hdf5.h"
-#include "hdf5_hl.h"
+#include <hdf5.h>
+#include <hdf5_hl.h>
+#include <tbb/tbb.h>
 
 #include <vtkType.h>
 #include <vtkSOADataArrayTemplate.h>
@@ -16,7 +16,15 @@
 #include <vtkXMLMultiBlockDataWriter.h>
 #include <vtkPolyDataWriter.h>
 
+// defining MEM_CHECK will result in a walk of the dataset
+// every point of every cell is sent to stderr stream used
+// in conjunction with valgrind this validates the cells
 //#define MEM_CHECK
+
+// this is meant to prevent multiple concurrent calls into HDF5
+// and it is also used to serialize debug output when MEM_CHECK
+// is defined
+tbb::mutex ioMutex;
 
 // --------------------------------------------------------------------------
 #define ERROR(_msg)                                                 \
@@ -24,37 +32,6 @@
     std::cerr << "Error: ["                                         \
         << __FILE__ << ":" << __LINE__ << "] " _msg << std::endl;   \
 }
-
-/*
-template <int>
-struct h5CppTt {};
-
-#define declareH5CppTt(_h5Enum, _cppT)  \
-template<>                              \
-struct h5CppTt<_h5Enum>                 \
-{                                       \
-    using cppType = _cppT;              \
-};
-
-declareH5CppTt(H5T_NATIVE_CHAR, char)
-declareH5CppTt(H5T_NATIVE_SCHAR, signed char)
-declareH5CppTt(H5T_NATIVE_UCHAR, unsigned char)
-declareH5CppTt(H5T_NATIVE_SHORT, short)
-declareH5CppTt(H5T_NATIVE_USHORT, unsigned short)
-declareH5CppTt(H5T_NATIVE_INT, int)
-declareH5CppTt(H5T_NATIVE_UINT, unsigned)
-declareH5CppTt(H5T_NATIVE_LONG, index_t)
-declareH5CppTt(H5T_NATIVE_ULONG, unsigned index_t)
-declareH5CppTt(H5T_NATIVE_LLONG, index_t index_t)
-declareH5CppTt(H5T_NATIVE_ULLONG, unsigned index_t index_t)
-declareH5CppTt(H5T_NATIVE_FLOAT, float)
-declareH5CppTt(H5T_NATIVE_DOUBLE, double)
-declareH5CppTt(H5T_NATIVE_LDOUBLE, index_t double)
-declareH5CppTt(H5T_NATIVE_HSIZE, hsize_t)
-declareH5CppTt(H5T_NATIVE_HSSIZE, hssize_t)
-declareH5CppTt(H5T_NATIVE_HERR, herr_t)
-declareH5CppTt(H5T_NATIVE_HBOOL, hbool_t)
-*/
 
 // --------------------------------------------------------------------------
 template<typename cppT>
@@ -98,6 +75,8 @@ template<typename index_t, typename coord_t>
 int read(const std::string &baseDir, int nId, coord_t *&p0,
     coord_t *&p5, coord_t *&p1, index_t &nSimpleCells)
 {
+    tbb::mutex::scoped_lock lock(ioMutex);
+
     char fn[256];
     snprintf(fn, 256, "%s/%d.h5", baseDir.c_str(), nId);
 
@@ -249,6 +228,8 @@ void print(index_t nSimpleCells, index_t *simpleCells,
     index_t complexCellArraySize, index_t nPts,
     coord_t *x, coord_t *y, coord_t *z)
 {
+    tbb::mutex::scoped_lock lock(ioMutex);
+
     std::cerr << "simpleCells(" << nSimpleCells << ")=";
     for (index_t i = 0; i < 3*nSimpleCells; ++i)
         std::cerr << simpleCells[i] << ", ";
@@ -699,88 +680,62 @@ int packageVtk(int id, index_t nPts, coord_t *x, coord_t *y, coord_t *z,
     return 0;
 }
 
-
-
-
-
-
-
-using integer_t = vtkIdType;
-using float_t = float;
-
-
-int main(int argc, char **argv)
+template<typename index_t, typename coord_t>
+struct ImportNeuron
 {
-    if (argc != 5)
+    ImportNeuron() :
+        blockId(-1), neuronId(-1), baseDir(nullptr), nSimpleCells(0),
+        p0(nullptr), p5(nullptr), p1(nullptr), nPts(0), x(nullptr),
+        y(nullptr), z(nullptr), simpleCells(nullptr), nComplexCells(0),
+        complexCells(nullptr), complexCellLens(nullptr),
+        complexCellLocs(nullptr), complexCellArraySize(0),
+        dist(nullptr), thick(nullptr)
+    {}
+
+    ImportNeuron(int bid, int nid, const char *dir) :
+        blockId(bid), neuronId(nid), baseDir(dir), nSimpleCells(0),
+        p0(nullptr), p5(nullptr), p1(nullptr), nPts(0), x(nullptr),
+        y(nullptr), z(nullptr), simpleCells(nullptr), nComplexCells(0),
+        complexCells(nullptr), complexCellLens(nullptr),
+        complexCellLocs(nullptr), complexCellArraySize(0),
+        dist(nullptr), thick(nullptr)
+    {}
+
+    ~ImportNeuron() {}
+
+    ImportNeuron(const ImportNeuron &) = delete;
+    ImportNeuron(ImportNeuron &&) = default;
+
+    ImportNeuron &operator=(const ImportNeuron &) = delete;
+    ImportNeuron &operator=(ImportNeuron &&) = default;
+
+    void operator()()
     {
-        std::cerr << "Usage: cvt [base dir] [first neuron] "
-            << "[last neuron] [out file]" << std::endl;
-        return -1;
-    }
-
-    const char *baseDir = argv[1];
-    int neuron0 = atoi(argv[2]);
-    int neuron1 = atoi(argv[3]);
-    int nNeuron = neuron1 - neuron0 + 1;
-    const char *ofBase = argv[4];
-
-    vtkMultiBlockDataSet *mbds = vtkMultiBlockDataSet::New();
-    mbds->SetNumberOfBlocks(nNeuron);
-
-    for (int i = 0; i < nNeuron; ++i)
-    {
-        std::cerr << "." << ((((i + 1) % 60) == 0) ? "\n" : "");
-        //std::cerr << std::flush;
-
-        int ii = neuron0 + i;
-
         // read the data for this instance
-        integer_t nSimpleCells = 0;
-        float_t *p0 = nullptr;
-        float_t *p5 = nullptr;
-        float_t *p1 = nullptr;
-        if (read(baseDir, ii, p0, p5, p1, nSimpleCells))
+        if (read(baseDir, neuronId, p0, p5, p1, nSimpleCells))
         {
-            ERROR("Failed to load neuron " << ii)
-            return -1;
+            ERROR("Failed to load neuron " << neuronId)
+            return;
         }
 
         // create the points and simple cells
-        integer_t nPts = 0;
-        float_t *x = nullptr;
-        float_t *y = nullptr;
-        float_t *z = nullptr;
-        integer_t *simpleCells = nullptr;
         initialize(nSimpleCells, p0, p5, p1, nPts, x, y, z, simpleCells);
 
         // remove duplicate points and merge segements
-        integer_t nComplexCells = 0;
-        integer_t *complexCells = nullptr;
-        integer_t *complexCellLens = nullptr;
-        integer_t *complexCellLocs = nullptr;
-        integer_t complexCellArraySize = 0;
         clean(nPts, x, y, z, nSimpleCells, simpleCells, nComplexCells,
             complexCells, complexCellLens, complexCellLocs,
             complexCellArraySize);
 
         // compute distance field
-        float_t *dist = nullptr;
         distance(nComplexCells, complexCells, complexCellLens,
             complexCellLocs,  nPts, x, y, z, dist);
 
-        float_t *thick = nullptr;
         thickness(nComplexCells, complexCells, complexCellLens,
             complexCellLocs,  nPts, x, y, z, dist, thick);
+    }
 
-        // package in VTK format
-        vtkPolyData *block = nullptr;
-        packageVtk(ii, nPts, x, y, z, nComplexCells, complexCells,
-            complexCellLens, complexCellLocs, complexCellArraySize,
-            dist, thick, block);
-
-        mbds->SetBlock(i, block);
-        block->Delete();
-
+    void freeMem()
+    {
         free(p0);
         free(p5);
         free(p1);
@@ -793,10 +748,132 @@ int main(int argc, char **argv)
         free(complexCellLocs);
         free(dist);
         free(thick);
+        nSimpleCells = 0;
+        p0 = nullptr;
+        p5 = nullptr;
+        p1 = nullptr;
+        nPts = 0;
+        x = nullptr;
+        y = nullptr;
+        z = nullptr;
+        simpleCells = nullptr;
+        nComplexCells = 0;
+        complexCells = nullptr;
+        complexCellLens = nullptr;
+        complexCellLocs = nullptr;
+        complexCellArraySize = 0;
+        dist = nullptr;
+        thick = nullptr;
     }
 
+    void package(vtkPolyData *&block)
+    {
+        // package in VTK format
+        packageVtk(neuronId, nPts, x, y, z, nComplexCells, complexCells,
+            complexCellLens, complexCellLocs, complexCellArraySize,
+            dist, thick, block);
+    }
 
-    // write as VTK
+    int blockId;
+    int neuronId;
+    const char *baseDir;
+    index_t nSimpleCells;
+    coord_t *p0;
+    coord_t *p5;
+    coord_t *p1;
+    index_t nPts;
+    coord_t *x;
+    coord_t *y;
+    coord_t *z;
+    index_t *simpleCells;
+    index_t nComplexCells;
+    index_t *complexCells;
+    index_t *complexCellLens;
+    index_t *complexCellLocs;
+    index_t complexCellArraySize;
+    coord_t *dist;
+    coord_t *thick;
+};
+
+
+
+template<typename index_t, typename coord_t>
+struct Importer
+{
+    Importer() = delete;
+
+    Importer(int n0, const char *dir,
+        std::vector<ImportNeuron<index_t,coord_t>> *n) :
+            neuron0(n0), baseDir(dir), neurons(n)
+    {}
+
+    void operator()(const tbb::blocked_range<int> &r) const
+    {
+        for (int i = r.begin(); i != r.end(); ++i)
+        {
+            ImportNeuron<index_t,coord_t> import(i, neuron0 + i, baseDir);
+            import();
+            (*neurons)[i] = std::move(import);
+#if defined(MEM_CHECK)
+            std::cerr << ".";
+#endif
+        }
+    }
+
+    int neuron0;
+    const char *baseDir;
+    std::vector<ImportNeuron<index_t,coord_t>> *neurons;
+};
+
+
+using integer_t = vtkIdType;
+using float_t = float;
+
+
+int main(int argc, char **argv)
+{
+    if (argc < 5)
+    {
+        std::cerr << "Usage: cvt [base dir] [first neuron] "
+            << "[last neuron] [out file] [n threads]" << std::endl;
+        return -1;
+    }
+
+    const char *baseDir = argv[1];
+    int neuron0 = atoi(argv[2]);
+    int neuron1 = atoi(argv[3]);
+    int nNeuron = neuron1 - neuron0 + 1;
+    const char *ofBase = argv[4];
+    int nThreads = argc > 5 ? atoi(argv[5]) : -1;
+
+    tbb::task_scheduler_init init(nThreads);
+
+    std::cerr << "importing " << nNeuron
+        << " neurons from " << baseDir << "...";
+
+    // import the data
+    std::vector<ImportNeuron<integer_t,float_t>> neurons(nNeuron);
+
+    tbb::parallel_for(tbb::blocked_range<int>(0,nNeuron),
+        Importer<integer_t,float_t>(neuron0, baseDir, &neurons));
+
+    std::cerr << "done!" << std::endl
+        << "packaging as VTK...";
+
+    // package as VTK
+    vtkMultiBlockDataSet *mbds = vtkMultiBlockDataSet::New();
+    mbds->SetNumberOfBlocks(nNeuron);
+
+    for (int i = 0; i < nNeuron; ++i)
+    {
+        vtkPolyData *block = nullptr;
+        neurons[i].package(block);
+        mbds->SetBlock(i, block);
+        block->Delete();
+        neurons[i].freeMem();
+    }
+
+    // write VTK
     vtkXMLMultiBlockDataWriter *writer = vtkXMLMultiBlockDataWriter::New();
     writer->SetInputData(mbds);
 
@@ -804,11 +881,16 @@ int main(int argc, char **argv)
     snprintf(outFileName, 256, "%s_%d_%d.%s", ofBase,
         neuron0, neuron1, writer->GetDefaultFileExtension());
 
+    std::cerr << "done!" << std::endl
+        << "writing to VTK at " << outFileName << "...";
+
     writer->SetFileName(outFileName);
     writer->Write();
 
     mbds->Delete();
     writer->Delete();
+
+    std::cerr << "done!" << std::endl;
 
     return 0;
 }

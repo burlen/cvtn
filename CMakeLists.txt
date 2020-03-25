@@ -11,7 +11,7 @@ endif()
 
 if (NOT MSVC)
   if (NOT CMAKE_CXX_FLAGS)
-  set(tmp "-fPIC -std=c++11 -Wall -Wextra")
+  set(tmp "-fPIC -std=c++17 -Wall -Wextra")
   if (BUILD_STATIC_EXECS)
     set(tmp "${tmp} -static -static-libgcc -static-libstdc++ -pthread -Wl,-Bstatic")
   endif()
@@ -42,7 +42,7 @@ find_package(HDF5 COMPONENTS C HL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TBB REQUIRED tbb)
 
-add_executable(cvt cvt.cpp)
+add_executable(cvt cvt.cpp import.cpp)
 target_link_libraries(cvt ${TBB_LIBRARIES}
     ${HDF5_HL_LIBRARIES} ${HDF5_C_LIBRARIES} ${VTK_LIBRARIES})
 

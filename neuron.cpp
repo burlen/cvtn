@@ -1,6 +1,6 @@
 #include <tbb/queuing_mutex.h>
 
-namespace import
+namespace neuron
 {
 
 // this is meant to prevent multiple concurrent calls into HDF5

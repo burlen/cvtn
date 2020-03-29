@@ -1,6 +1,4 @@
-#include "import.h"
-
-
+#include "neuron.h"
 
 using index_t = long;
 using coord_t = float;
@@ -34,29 +32,29 @@ int main(int argc, char **argv)
     std::cerr << "importing " << nNeuron << " neurons " << neuron0
         << " to " << neuron1 << " from " << inputDir << "...";
 
-    std::vector<import::Neuron<index_t,coord_t,data_t>> neurons(nNeuron);
+    std::vector<neuron::Neuron<index_t,coord_t,data_t>> neurons(nNeuron);
 
     tbb::parallel_for(tbb::blocked_range<int>(0,nNeuron),
-        import::Importer<index_t,coord_t,data_t>(neuron0, inputDir, &neurons));
+        neuron::Importer<index_t,coord_t,data_t>(neuron0, inputDir, &neurons));
 
     std::cerr << "done!" << std::endl
         << "intializing time series, mesher, and exporter...";
 
     // initailze time series handlers
-    import::TimeSeries<index_t, coord_t, data_t> timeSeries(inputDir, &neurons);
+    neuron::TimeSeries<index_t, coord_t, data_t> timeSeries(inputDir, &neurons);
     if (timeSeries.initialize())
         return -1;
 
-    import::Mesher<index_t, coord_t, data_t> mesher(&neurons);
+    neuron::Mesher<index_t, coord_t, data_t> mesher(&neurons);
     if (mesher.initialize(nCells))
         return -1;
 
-    import::Exporter<index_t, coord_t, data_t> exporter;
+    neuron::Exporter<index_t, coord_t, data_t> exporter;
     if (exporter.initialize(outputDir, outputFile, mesher))
         return -1;
 
-    import::ReduceAverage<index_t, data_t> avg;
-    import::ReduceMaxAbs<index_t, data_t> mxa;
+    neuron::ReduceAverage<index_t, data_t> avg(timeSeries.scalarName);
+    neuron::ReduceMaxAbs<index_t, data_t> mxa(timeSeries.scalarName);
 
     std::cerr << "done!" << std::endl;
     timeSeries.print();
@@ -79,14 +77,14 @@ int main(int argc, char **argv)
         const char *names[] = {avg.getName(), mxa.getName()};
         data_t *arrays[] = {avg.getResult(), mxa.getResult()};
 
-        if (exporter.write(i, 2, arrays, names))
+        if (exporter.writeMesh(i, 2, arrays, names))
             return -1;
 
         avg.freeMem();
         mxa.freeMem();
 
         // export the neurons
-        if (exporter.write(i, &neurons))
+        if (exporter.writeCells(i, &neurons))
             return -1;
 
         std::cerr << "done!" << std::endl;
@@ -101,6 +99,8 @@ int main(int argc, char **argv)
     timeSeries.freeMem();
     mesher.freeMem();
     exporter.freeMem();
+
+    std::cerr << "done!" << std::endl;
 
     return 0;
 }

@@ -36,6 +36,7 @@
 #include <vtkMultiBlockDataSet.h>
 #include <vtkXMLMultiBlockDataWriter.h>
 #include <vtkXMLImageDataWriter.h>
+#include <vtkXMLPolyDataWriter.h>
 #include <vtkPolyDataWriter.h>
 
 /*#include <vtkXMLMultiBlockDataWriter.h>
@@ -57,6 +58,13 @@ neuron::m_type_map m_types;
 // every point of every cell is sent to stderr stream used
 // in conjunction with valgrind this validates the cells
 //#define MEM_CHECK
+
+// force the removal of the first simple cell. this is
+// assumed to be the root of the neuron. if that is not
+// the case then unsetting this will lead to assert fail
+// in the packaging code which is written to factor the
+// root and associated data into a separate dataset.
+#define FORCE_CLEAN_ROOT
 
 // this is meant to prevent multiple concurrent calls into HDF5
 // and it is also used to serialize debug output when MEM_CHECK
@@ -709,14 +717,23 @@ int clean(index_t &nPts, coord_t *& __restrict__ x, coord_t *& __restrict__ y,
         nComplexCells += 1;
         nnPts += 3;
 
+#if defined(FORCE_CLEAN_ROOT)
+        // pass the first simple cell, which we assume is the
+        // root. there are some neurons that have points close
+        // enough to the root that the root is included in a branch
+        // which breaks our i/o code. force clean is currently
+        // necessary, but it also makes it impossible to detect
+        // when the root is not the first cell.
+        visit[i] = 1;
+        if (i == 0)
+            continue;
+#endif
+
         // check the last point in this cell
         ii = 3*i + 2;
         coord_t xi = x[ii];
         coord_t yi = y[ii];
         coord_t zi = z[ii];
-
-        // mark this as visited
-        visit[i] = 1;
 
         index_t j = 0;
         while (j < nSimpleCells)
@@ -1062,10 +1079,192 @@ int packageVtk(index_t *nc, coord_t *x0, coord_t *dx,
         scalar->SetArray(dist, nCells, true);
 #else
         scalar->SetNumberOfTuples(nCells);
-        memcpy(scalar->GetPointer(0), cellScalar[i], nCells*sizeof(data_t));
+        memcpy(scalar->GetPointer(0), cellScalar[i],
+            nCells*sizeof(data_t));
 #endif
         imd->GetCellData()->AddArray(scalar);
         scalar->Delete();
+    }
+
+    return 0;
+}
+
+// --------------------------------------------------------------------------
+template<typename index_t, typename coord_t>
+int appendAttsVtk(int id, index_t nPtsOut, index_t nPtsAlready,
+    index_t nCellsOut, index_t nCellsAlready, coord_t *pos,
+    int e_type, int m_type, int ei, int layer, int active,
+    vtkPolyData *&dataset)
+{
+    (void)pos;
+
+    // nid
+    vtkIntArray *nid = dynamic_cast<vtkIntArray*>(
+        dataset->GetCellData()->GetArray("nid"));
+    int *pnid = nid->WritePointer(nCellsAlready, nCellsOut);
+    for (index_t i = 0; i < nCellsOut; ++i)
+        pnid[i] = id;
+
+    nid = dynamic_cast<vtkIntArray*>(
+        dataset->GetPointData()->GetArray("nid"));
+    pnid = nid->WritePointer(nPtsAlready, nPtsOut);
+    for (index_t i = 0; i < nPtsOut; ++i)
+        pnid[i] = id;
+
+    // e type
+    vtkIntArray *et = dynamic_cast<vtkIntArray*>(
+        dataset->GetCellData()->GetArray("e_type"));
+    int *pet = et->WritePointer(nCellsAlready, nCellsOut);
+    for (index_t i = 0; i < nCellsOut; ++i)
+        pet[i] = e_type;
+
+    et = dynamic_cast<vtkIntArray*>(
+        dataset->GetPointData()->GetArray("e_type"));
+    pet = et->WritePointer(nPtsAlready, nPtsOut);
+    for (index_t i = 0; i < nPtsOut; ++i)
+        pet[i] = e_type;
+
+    // m type
+    vtkIntArray *mt = dynamic_cast<vtkIntArray*>(
+        dataset->GetCellData()->GetArray("m_type"));
+    int *pmt = mt->WritePointer(nCellsAlready, nCellsOut);
+    for (index_t i = 0; i < nCellsOut; ++i)
+        pmt[i] = m_type;
+
+    mt = dynamic_cast<vtkIntArray*>(
+        dataset->GetPointData()->GetArray("m_type"));
+    pmt = mt->WritePointer(nPtsAlready, nPtsOut);
+    for (index_t i = 0; i < nPtsOut; ++i)
+        pmt[i] = m_type;
+
+    // e/i
+    vtkIntArray *exc = dynamic_cast<vtkIntArray*>(
+        dataset->GetCellData()->GetArray("ei"));
+    int *pexc = exc->WritePointer(nCellsAlready, nCellsOut);
+    for (index_t i = 0; i < nCellsOut; ++i)
+        pexc[i] = ei;
+
+    exc = dynamic_cast<vtkIntArray*>(
+        dataset->GetPointData()->GetArray("ei"));
+    pexc = exc->WritePointer(nPtsAlready, nPtsOut);
+    for (index_t i = 0; i < nPtsOut; ++i)
+        pexc[i] = ei;
+
+    // layer
+    vtkIntArray *lyr = dynamic_cast<vtkIntArray*>(
+        dataset->GetCellData()->GetArray("layer"));
+    int *plyr = lyr->WritePointer(nCellsAlready, nCellsOut);
+    for (index_t i = 0; i < nCellsOut; ++i)
+        plyr[i] = layer;
+
+    lyr = dynamic_cast<vtkIntArray*>(
+        dataset->GetPointData()->GetArray("layer"));
+    plyr = lyr->WritePointer(nPtsAlready, nPtsOut);
+    for (index_t i = 0; i < nPtsOut; ++i)
+        plyr[i] = layer;
+
+    // active
+    vtkIntArray *acti = dynamic_cast<vtkIntArray*>(
+        dataset->GetCellData()->GetArray("active"));
+    int *pacti = acti->WritePointer(nCellsAlready, nCellsOut);
+    for (index_t i = 0; i < nCellsOut; ++i)
+        pacti[i] = active;
+
+    acti = dynamic_cast<vtkIntArray*>(
+        dataset->GetPointData()->GetArray("active"));
+    pacti = acti->WritePointer(nPtsAlready, nPtsOut);
+    for (index_t i = 0; i < nPtsOut; ++i)
+        pacti[i] = active;
+
+    return 0;
+}
+
+// --------------------------------------------------------------------------
+template<typename index_t, typename coord_t, typename data_t>
+int appendNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
+    coord_t * __restrict__ y, coord_t * __restrict__ z,
+    coord_t * __restrict__ d, index_t nCells, index_t * __restrict__ cells,
+    index_t * __restrict__ cellLens, index_t * __restrict__ cellLocs,
+    index_t cellArraySize, coord_t * __restrict__ dist,
+    coord_t * __restrict__ thick, data_t * __restrict__ scalar,
+    const char *scalarName,  coord_t *pos, int e_type, int m_type, int ei,
+    int layer, int active, vtkPolyData *&dataset)
+{
+    assert(cellLens[0] == 3);
+    assert(cells[1] == 1);
+
+    (void)cells;
+    (void)nCells;
+    (void)nPts;
+    (void)d;
+    (void)cellLens;
+    (void)cellLocs;
+    (void)cellArraySize;
+    (void)dist;
+    (void)thick;
+    (void)pos;
+
+    // only package
+    index_t nCellsOut = 1;
+    index_t nPtsOut = 1;
+
+    // get the length of the current dataset
+    vtkCellArray *cellArray = dataset->GetVerts();
+    index_t nCellsAlready = cellArray->GetNumberOfCells();
+
+    vtkAOSDataArrayTemplate<coord_t> *coords =
+        dynamic_cast<vtkAOSDataArrayTemplate<coord_t>*>(
+            dataset->GetPoints()->GetData());
+
+    index_t nPtsAlready = coords->GetNumberOfTuples();
+
+    // convert cells into VTK's format
+    vtkIdTypeArray *cellIds = cellArray->GetData();
+    vtkIdType * __restrict__ dst = cellIds->WritePointer(
+        cellIds->GetNumberOfTuples(), 2*nCellsOut);
+    dst[0] = 1;
+    dst[1] = nPtsAlready;
+
+    vtkCellArray *cao = vtkCellArray::New();
+    cao->SetCells(nCellsOut + nCellsAlready, cellIds);
+    dataset->SetVerts(cao);
+    cao->Delete();
+
+    // deep copy points
+    coord_t * __restrict__ pcoords
+        = coords->WritePointer(3*nPtsAlready, 3*nPtsOut);
+    pcoords[0] = x[1];
+    pcoords[1] = y[1];
+    pcoords[2] = z[1];
+
+    // per neuron attributes
+    appendAttsVtk(id, nPtsOut, nPtsAlready, nCellsOut,
+        nCellsAlready, pos, e_type, m_type, ei, layer,
+        active, dataset);
+
+    // radius. distance from the node to the first non-node cell first point
+    coord_t dx = x[1] - x[3];
+    coord_t dy = y[1] - y[3];
+    coord_t dz = z[1] - z[3];
+    coord_t r = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+    vtkAOSDataArrayTemplate<coord_t> *rad =
+        dynamic_cast<vtkAOSDataArrayTemplate<coord_t>*>(
+            dataset->GetPointData()->GetArray("radius"));
+    memcpy(rad->WritePointer(nPtsAlready, nPtsOut),
+        &r, nPtsOut*sizeof(coord_t));
+
+    if (scalar)
+    {
+        // scalar
+        // differentiate the scalar so that a different color scale range can be used
+        char buf[128];
+        snprintf(buf, 127, "%s_n", scalarName);
+        vtkAOSDataArrayTemplate<data_t> *sa =
+            dynamic_cast<vtkAOSDataArrayTemplate<data_t>*>(
+                dataset->GetPointData()->GetArray(buf));
+        memcpy(sa->WritePointer(nPtsAlready, nPtsOut),
+            &scalar[1], nPtsOut*sizeof(data_t));
     }
 
     return 0;
@@ -1197,14 +1396,14 @@ int packageNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
     vtkIntArray *nei = vtkIntArray::New();
     nei->SetNumberOfTuples(nCellsOut);
     nei->FillValue(ei);
-    nei->SetName("excite");
+    nei->SetName("ei");
     dataset->GetCellData()->AddArray(nei);
     nei->Delete();
 
     nei = vtkIntArray::New();
     nei->SetNumberOfTuples(nPtsOut);
     nei->FillValue(ei);
-    nei->SetName("excite");
+    nei->SetName("ei");
     dataset->GetPointData()->AddArray(nei);
     nei->Delete();
 
@@ -1255,6 +1454,367 @@ int packageNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
 #endif
         dataset->GetPointData()->AddArray(sa);
         sa->Delete();
+    }
+
+    return 0;
+}
+
+// --------------------------------------------------------------------------
+template<typename index_t, typename coord_t, typename data_t>
+vtkPolyData *allocNodesVtk(const char *scalarName)
+{
+    // allocate and initialize the dataset
+    vtkPolyData *dataset = vtkPolyData::New();
+
+    // points
+    vtkAOSDataArrayTemplate<coord_t> *coords =
+        vtkAOSDataArrayTemplate<coord_t>::New();
+    coords->SetNumberOfComponents(3);
+
+    vtkPoints *pts = vtkPoints::New();
+    pts->SetData(coords);
+    coords->Delete();
+
+    dataset->SetPoints(pts);
+    pts->Delete();
+
+    // verts
+    vtkCellArray *ca = vtkCellArray::New();
+    dataset->SetVerts(ca);
+    ca->Delete();
+    ca = vtkCellArray::New();
+    dataset->SetLines(ca);
+    ca->Delete();
+    ca = vtkCellArray::New();
+    dataset->SetPolys(ca);
+    ca->Delete();
+    ca = vtkCellArray::New();
+    dataset->SetStrips(ca);
+    ca->Delete();
+
+    // nid
+    vtkIntArray *nid = vtkIntArray::New();
+    nid->SetName("nid");
+    dataset->GetCellData()->AddArray(nid);
+    nid->Delete();
+
+    nid = vtkIntArray::New();
+    nid->SetName("nid");
+    dataset->GetPointData()->AddArray(nid);
+    nid->Delete();
+
+    // e type
+    vtkIntArray *et = vtkIntArray::New();
+    et->SetName("e_type");
+    dataset->GetCellData()->AddArray(et);
+    et->Delete();
+
+    et = vtkIntArray::New();
+    et->SetName("e_type");
+    dataset->GetPointData()->AddArray(et);
+    et->Delete();
+
+    // m type
+    vtkIntArray *mt = vtkIntArray::New();
+    mt->SetName("m_type");
+    dataset->GetCellData()->AddArray(mt);
+    mt->Delete();
+
+    mt = vtkIntArray::New();
+    mt->SetName("m_type");
+    dataset->GetPointData()->AddArray(mt);
+    mt->Delete();
+
+    // e/i
+    vtkIntArray *nei = vtkIntArray::New();
+    nei->SetName("ei");
+    dataset->GetCellData()->AddArray(nei);
+    nei->Delete();
+
+    nei = vtkIntArray::New();
+    nei->SetName("ei");
+    dataset->GetPointData()->AddArray(nei);
+    nei->Delete();
+
+    // layer
+    vtkIntArray *nla = vtkIntArray::New();
+    nla->SetName("layer");
+    dataset->GetCellData()->AddArray(nla);
+    nla->Delete();
+
+    nla = vtkIntArray::New();
+    nla->SetName("layer");
+    dataset->GetPointData()->AddArray(nla);
+    nla->Delete();
+
+    // active
+    vtkIntArray *acti = vtkIntArray::New();
+    acti->SetName("active");
+    dataset->GetCellData()->AddArray(acti);
+    acti->Delete();
+
+    acti = vtkIntArray::New();
+    acti->SetName("active");
+    dataset->GetPointData()->AddArray(acti);
+    acti->Delete();
+
+    // radius
+    vtkAOSDataArrayTemplate<coord_t> *radius =
+        vtkAOSDataArrayTemplate<coord_t>::New();
+    radius->SetName("radius");
+    dataset->GetPointData()->AddArray(radius);
+    radius->Delete();
+
+    // scalar
+    if (scalarName)
+    {
+        // differentiate the scalar so that a different color scale range can be used
+        char buf[128];
+        snprintf(buf, 127, "%s_n", scalarName);
+        vtkAOSDataArrayTemplate<data_t> *sa =
+            vtkAOSDataArrayTemplate<data_t>::New();
+        sa->SetName(buf);
+        dataset->GetPointData()->AddArray(sa);
+        sa->Delete();
+    }
+
+    return dataset;
+}
+
+// --------------------------------------------------------------------------
+template<typename index_t, typename coord_t, typename data_t>
+vtkPolyData *allocCellsVtk(const char *scalarName)
+{
+    // allocate and initialize the dataset
+    vtkPolyData *dataset = vtkPolyData::New();
+
+    // points
+    vtkAOSDataArrayTemplate<coord_t> *coords =
+        vtkAOSDataArrayTemplate<coord_t>::New();
+    coords->SetNumberOfComponents(3);
+
+    vtkPoints *pts = vtkPoints::New();
+    pts->SetData(coords);
+    coords->Delete();
+
+    dataset->SetPoints(pts);
+    pts->Delete();
+
+    // these need to be installed due to quirk in vtk
+    // where a default array is shared between all cells
+    // in the polydata
+    vtkCellArray *ca = vtkCellArray::New();
+    dataset->SetVerts(ca);
+    ca->Delete();
+    ca = vtkCellArray::New();
+    dataset->SetLines(ca);
+    ca->Delete();
+    ca = vtkCellArray::New();
+    dataset->SetPolys(ca);
+    ca->Delete();
+    ca = vtkCellArray::New();
+    dataset->SetStrips(ca);
+    ca->Delete();
+
+    // nid
+    vtkIntArray *nid = vtkIntArray::New();
+    nid->SetName("nid");
+    dataset->GetCellData()->AddArray(nid);
+    nid->Delete();
+
+    nid = vtkIntArray::New();
+    nid->SetName("nid");
+    dataset->GetPointData()->AddArray(nid);
+    nid->Delete();
+
+    // e type
+    vtkIntArray *et = vtkIntArray::New();
+    et->SetName("e_type");
+    dataset->GetCellData()->AddArray(et);
+    et->Delete();
+
+    et = vtkIntArray::New();
+    et->SetName("e_type");
+    dataset->GetPointData()->AddArray(et);
+    et->Delete();
+
+    // m type
+    vtkIntArray *mt = vtkIntArray::New();
+    mt->SetName("m_type");
+    dataset->GetCellData()->AddArray(mt);
+    mt->Delete();
+
+    mt = vtkIntArray::New();
+    mt->SetName("m_type");
+    dataset->GetPointData()->AddArray(mt);
+    mt->Delete();
+
+    // e/i
+    vtkIntArray *nei = vtkIntArray::New();
+    nei->SetName("ei");
+    dataset->GetCellData()->AddArray(nei);
+    nei->Delete();
+
+    nei = vtkIntArray::New();
+    nei->SetName("ei");
+    dataset->GetPointData()->AddArray(nei);
+    nei->Delete();
+
+    // layer
+    vtkIntArray *nla = vtkIntArray::New();
+    nla->SetName("layer");
+    dataset->GetCellData()->AddArray(nla);
+    nla->Delete();
+
+    nla = vtkIntArray::New();
+    nla->SetName("layer");
+    dataset->GetPointData()->AddArray(nla);
+    nla->Delete();
+
+    // active
+    vtkIntArray *acti = vtkIntArray::New();
+    acti->SetName("active");
+    dataset->GetCellData()->AddArray(acti);
+    acti->Delete();
+
+    acti = vtkIntArray::New();
+    acti->SetName("active");
+    dataset->GetPointData()->AddArray(acti);
+    acti->Delete();
+
+    // distance from first point
+    vtkAOSDataArrayTemplate<coord_t> *distance =
+        vtkAOSDataArrayTemplate<coord_t>::New();
+    distance->SetName("distance");
+    dataset->GetPointData()->AddArray(distance);
+    distance->Delete();
+
+    // thickness
+    vtkAOSDataArrayTemplate<coord_t> *thickness =
+        vtkAOSDataArrayTemplate<coord_t>::New();
+    thickness->SetName("thickness");
+    dataset->GetPointData()->AddArray(thickness);
+    thickness->Delete();
+
+    // diameter
+    vtkAOSDataArrayTemplate<coord_t> *diameter =
+        vtkAOSDataArrayTemplate<coord_t>::New();
+    diameter->SetName("diameter");
+    dataset->GetPointData()->AddArray(diameter);
+    diameter->Delete();
+
+    // scalar
+    if (scalarName)
+    {
+        vtkAOSDataArrayTemplate<data_t> *sa =
+            vtkAOSDataArrayTemplate<data_t>::New();
+        sa->SetName(scalarName);
+        dataset->GetPointData()->AddArray(sa);
+        sa->Delete();
+    }
+
+    return dataset;
+}
+
+// --------------------------------------------------------------------------
+template<typename index_t, typename coord_t, typename data_t>
+int appendCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
+    coord_t * __restrict__ y, coord_t * __restrict__ z,
+    coord_t * __restrict__ d, index_t nCells, index_t * __restrict__ cells,
+    index_t * __restrict__ cellLens, index_t * __restrict__ cellLocs,
+    index_t cellArraySize, coord_t * __restrict__ dist,
+    coord_t * __restrict__ thick, data_t * __restrict__ scalar,
+    const char *scalarName, coord_t *pos, int e_type, int m_type, int ei,
+    int layer, int active, vtkPolyData *&dataset)
+{
+    (void)pos;
+
+    // skip the root node. root is always the first cell,
+    // and always has 3 points
+    assert(cellLens[0] == 3);
+    assert(cells[1] == 1);
+
+    index_t nRtPts = 3;
+    index_t nCellsOut = nCells - 1;
+    index_t nPtsOut = nPts - nRtPts;
+    index_t cellArraySizeOut = cellArraySize - nRtPts;
+
+    // get the length of the current dataset
+    vtkCellArray *cellArray = dataset->GetLines();
+    index_t nCellsAlready = cellArray->GetNumberOfCells();
+
+    vtkAOSDataArrayTemplate<coord_t> *coords =
+        dynamic_cast<vtkAOSDataArrayTemplate<coord_t>*>(
+            dataset->GetPoints()->GetData());
+
+    index_t nPtsAlready = coords->GetNumberOfTuples();
+
+    // convert cells into VTK's format
+    vtkIdTypeArray *cellIds = cellArray->GetData();
+    vtkIdType * __restrict__ dst = cellIds->WritePointer(
+        cellIds->GetNumberOfTuples(), cellArraySizeOut + nCellsOut);
+    for (index_t i = 1; i < nCells; ++i)
+    {
+        index_t * __restrict__ src = cells + cellLocs[i];
+        index_t cellLen = cellLens[i];
+        dst[0] = cellLen;
+        dst += 1;
+        for (index_t j = 0; j < cellLen; ++j)
+            dst[j] = src[j] - nRtPts + nPtsAlready;
+        dst += cellLen;
+    }
+
+    vtkCellArray *cao = vtkCellArray::New();
+    cao->SetCells(nCellsAlready + nCellsOut, cellIds);
+    dataset->SetLines(cao);
+    cao->Delete();
+
+    // deep copy points
+    coords->SetNumberOfTuples(nPtsOut);
+    coord_t * __restrict__ pcoords
+        = coords->WritePointer(3*nPtsAlready, 3*nPtsOut);
+    for (index_t i = 0, q = nRtPts; i < nPtsOut; ++i, ++q)
+    {
+        index_t ii = 3*i;
+        pcoords[ii  ] = x[q];
+        pcoords[ii+1] = y[q];
+        pcoords[ii+2] = z[q];
+    }
+
+    // per neuron attributes
+    appendAttsVtk(id, nPtsOut, nPtsAlready, nCellsOut,
+        nCellsAlready, pos, e_type, m_type, ei, layer,
+        active, dataset);
+
+    // distance from first point
+    vtkAOSDataArrayTemplate<coord_t> *distance =
+        dynamic_cast<vtkAOSDataArrayTemplate<coord_t>*>(
+            dataset->GetPointData()->GetArray("distance"));
+    memcpy(distance->WritePointer(nPtsAlready, nPtsOut),
+        dist + nRtPts, nPtsOut*sizeof(coord_t));
+
+    // thickness
+    vtkAOSDataArrayTemplate<coord_t> *thickness =
+        dynamic_cast<vtkAOSDataArrayTemplate<coord_t>*>(
+            dataset->GetPointData()->GetArray("thickness"));
+    memcpy(thickness->WritePointer(nPtsAlready, nPtsOut),
+        thick + nRtPts, nPtsOut*sizeof(coord_t));
+
+    // diameter
+    vtkAOSDataArrayTemplate<coord_t> *diameter =
+        dynamic_cast<vtkAOSDataArrayTemplate<coord_t>*>(
+            dataset->GetPointData()->GetArray("diameter"));
+    memcpy(diameter->WritePointer(nPtsAlready, nPtsOut),
+        d + nRtPts, nPtsOut*sizeof(coord_t));
+
+    if (scalar)
+    {
+        // scalar
+        vtkAOSDataArrayTemplate<data_t> *sa =
+            dynamic_cast<vtkAOSDataArrayTemplate<data_t>*>(
+                dataset->GetPointData()->GetArray(scalarName));
+        memcpy(sa->WritePointer(nPtsAlready, nPtsOut),
+            scalar + nRtPts, nPtsOut*sizeof(data_t));
     }
 
     return 0;
@@ -1386,14 +1946,14 @@ int packageCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
     vtkIntArray *nei = vtkIntArray::New();
     nei->SetNumberOfTuples(nCellsOut);
     nei->FillValue(ei);
-    nei->SetName("excite");
+    nei->SetName("ei");
     dataset->GetCellData()->AddArray(nei);
     nei->Delete();
 
     nei = vtkIntArray::New();
     nei->SetNumberOfTuples(nPtsOut);
     nei->FillValue(ei);
-    nei->SetName("excite");
+    nei->SetName("ei");
     dataset->GetPointData()->AddArray(nei);
     nei->Delete();
 
@@ -1698,7 +2258,8 @@ struct ReduceAverage
     void reduce(index_t nPts, const index_t * __restrict__ meshIds,
         const data_t * __restrict__ scalar)
     {
-        for (index_t q = 0; q < nPts; ++q)
+        // skip first 3 points, they belong to the root
+        for (index_t q = 3; q < nPts; ++q)
         {
             index_t qq = meshIds[q];
             result[qq] += scalar[q];
@@ -1771,7 +2332,8 @@ struct ReduceMaxAbs
     void reduce(index_t nPts, const index_t * __restrict__ meshIds,
         const data_t * __restrict__ scalar)
     {
-        for (index_t q = 0; q < nPts; ++q)
+        // skip first 3 points, they belong to the root
+        for (index_t q = 3; q < nPts; ++q)
         {
             index_t qq = meshIds[q];
             result[qq] = fabs(scalar[q]) > fabs(result[qq]) ?
@@ -1840,7 +2402,8 @@ struct ReduceMax
     void reduce(index_t nPts, const index_t * __restrict__ meshIds,
         const data_t * __restrict__ scalar)
     {
-        for (index_t q = 0; q < nPts; ++q)
+        // skip first 3 points, they belong to the root
+        for (index_t q = 3; q < nPts; ++q)
         {
             index_t qq = meshIds[q];
             result[qq] = scalar[q] > result[qq] ?  scalar[q] : result[qq];
@@ -1877,6 +2440,23 @@ struct ReduceMax
 };
 
 
+// return true if any value is above the threshold
+template<typename index_t, typename data_t>
+int anyAbove(index_t nPts, data_t *scalar, data_t thresh)
+{
+    // always skip first 3 points, they are the root
+    for (index_t i = 0; i < nPts; ++i)
+    {
+        data_t as = std::fabs(scalar[i]);
+        if (as > thresh)
+            return 1;
+    }
+    return 0;
+}
+
+
+
+
 
 
 // helper class that does the work of importing a single neuron
@@ -1889,8 +2469,8 @@ struct Neuron
         blockId(-1), neuronId(-1), baseDir(nullptr), nSimpleCells(0),
         p0(nullptr), p5(nullptr), p1(nullptr), d0(nullptr), d5(nullptr),
         d1(nullptr), spos{-1,-1,-1}, e_type(-1), m_type(-1),
-        ei(-1), layer(-1), nPts(0), x(nullptr), y(nullptr), z(nullptr),
-        d(nullptr), simpleCells(nullptr), nComplexCells(0),
+        ei(-1), layer(-1), active(1), nPts(0), x(nullptr), y(nullptr),
+        z(nullptr), d(nullptr), simpleCells(nullptr), nComplexCells(0),
         complexCells(nullptr), complexCellLens(nullptr),
         complexCellLocs(nullptr), complexCellArraySize(0), dist(nullptr),
         thick(nullptr), scalar(nullptr), scalarName(nullptr), count(nullptr),
@@ -1901,8 +2481,8 @@ struct Neuron
         blockId(bid), neuronId(nid), baseDir(dir), nSimpleCells(0),
         p0(nullptr), p5(nullptr), p1(nullptr), d0(nullptr), d5(nullptr),
         d1(nullptr), spos{-1,-1,-1}, e_type(-1), m_type(-1),
-        ei(-1), layer(-1), nPts(0), x(nullptr), y(nullptr), z(nullptr),
-        d(nullptr), simpleCells(nullptr), nComplexCells(0),
+        ei(-1), layer(-1), active(1), nPts(0), x(nullptr), y(nullptr),
+        z(nullptr), d(nullptr), simpleCells(nullptr), nComplexCells(0),
         complexCells(nullptr), complexCellLens(nullptr),
         complexCellLocs(nullptr), complexCellArraySize(0), dist(nullptr),
         thick(nullptr), scalar(nullptr), scalarName(nullptr), count(nullptr),
@@ -1969,8 +2549,10 @@ struct Neuron
     {
         // interpolate from simple cells to reduced point set
         scalarName = name;
-        return cellToPoint(simpleCells, nSimpleCells, nPts,
+        cellToPoint(simpleCells, nSimpleCells, nPts,
             count, cellScalar, scalar);
+        active = anyAbove(nPts, scalar, data_t(0.07));
+        return 0;
     }
 
     void freeMem()
@@ -2006,6 +2588,7 @@ struct Neuron
         m_type = -1;
         ei = -1;
         layer = -1;
+        active = 1;
         nPts = 0;
         x = nullptr;
         y = nullptr;
@@ -2023,6 +2606,24 @@ struct Neuron
         scalarName = nullptr;
         count = nullptr;
         meshIds = nullptr;
+    }
+
+    void appendCells(vtkPolyData *&block)
+    {
+        // append in VTK format
+        appendCellsVtk(neuronId, nPts, x, y, z, d, nComplexCells, complexCells,
+            complexCellLens, complexCellLocs, complexCellArraySize,
+            dist, thick, scalar, scalarName, spos, e_type, m_type, ei,
+            layer, active, block);
+    }
+
+    void appendNodes(vtkPolyData *&block)
+    {
+        // append in VTK format
+        appendNodesVtk(neuronId, nPts, x, y, z, d, nComplexCells, complexCells,
+            complexCellLens, complexCellLocs, complexCellArraySize,
+            dist, thick, scalar, scalarName, spos, e_type, m_type, ei,
+            layer, active, block);
     }
 
     void packageCells(vtkPolyData *&block)
@@ -2058,6 +2659,7 @@ struct Neuron
     int m_type;
     int ei;
     int layer;
+    int active;
     index_t nPts;
     coord_t *x;
     coord_t *y;
@@ -2347,6 +2949,47 @@ struct Mesher
 };
 
 // helper to write vtk dataset in the back ground
+struct pdIoTask
+{
+    pdIoTask(const pdIoTask &o) = default;
+
+    pdIoTask() : pdds(nullptr), baseDir(nullptr),
+        dsetName(nullptr), dsetId(nullptr), step(-1)
+    {}
+
+    pdIoTask(vtkPolyData *ds, const char *bdir, const char *dsn,
+        const char *dsi, int s) :  pdds(ds), baseDir(bdir),
+        dsetName(dsn), dsetId(dsi), step(s)
+    {}
+
+    void operator()() const
+    {
+        vtkXMLPolyDataWriter *writer = vtkXMLPolyDataWriter::New();
+        writer->SetInputData(pdds);
+
+        char outFileName[1024];
+        snprintf(outFileName, 1023, "%s/%s_%s_%06d.%s", baseDir,
+            dsetName, dsetId, int(step), writer->GetDefaultFileExtension());
+
+        writer->SetFileName(outFileName);
+        if (writer->Write() == 0)
+        {
+            ERROR("vtk writer failed to write neurons \"" << outFileName << "\"")
+            throw std::runtime_error("VTK failed to write");
+        }
+
+        pdds->Delete();
+        writer->Delete();
+    }
+
+    vtkPolyData *pdds;
+    const char *baseDir;
+    const char *dsetName;
+    const char *dsetId;
+    int step;
+};
+
+// helper to write vtk dataset in the back ground
 struct mbIoTask
 {
     mbIoTask(const mbIoTask &o) = default;
@@ -2488,6 +3131,9 @@ struct Exporter
     {
         index_t nNeuron = neurons->size();
 
+// multiblock is atrociously slow in paraview, this was the origional
+// code.
+#if defined(USE_MULTIBLOCK)
         // package cells as VTK
         vtkMultiBlockDataSet *cmbds = vtkMultiBlockDataSet::New();
         cmbds->SetNumberOfBlocks(nNeuron);
@@ -2523,6 +3169,40 @@ struct Exporter
         // write VTK
         mbIoTask nodeWriter(nmbds, baseDir, dsetName, "nodes", step);
         ioTasks.run(nodeWriter);
+#else
+        // package cells as VTK
+        vtkPolyData *cds = allocCellsVtk<index_t,coord_t,data_t>(
+                (*neurons)[0].scalarName);
+
+        for (int i = 0; i < nNeuron; ++i)
+        {
+            (*neurons)[i].appendCells(cds);
+        }
+
+#if defined(MEM_CHECK)
+        cds->Print(std::cerr);
+#endif
+        // write VTK
+        pdIoTask cellWriter(cds, baseDir, dsetName, "cells", step);
+        ioTasks.run(cellWriter);
+
+        // package nodes as VTK
+        vtkPolyData *nds = allocNodesVtk<index_t,coord_t,data_t>(
+            (*neurons)[0].scalarName);
+
+        for (int i = 0; i < nNeuron; ++i)
+        {
+            (*neurons)[i].appendNodes(nds);
+        };
+
+#if defined(MEM_CHECK)
+        nds->Print(std::cerr);
+#endif
+
+        // write VTK
+        pdIoTask nodeWriter(nds, baseDir, dsetName, "nodes", step);
+        ioTasks.run(nodeWriter);
+#endif
 
         return 0;
     }

@@ -38,12 +38,15 @@ int main(int argc, char **argv)
     int nThreads = argc > 11 ? atoi(argv[11]) : -1;
 
     tbb::task_scheduler_init init(nThreads);
+    std::cerr << "initializing with " << nThreads << " threads" << std::endl;
 
     // import the nerons
     int nNeuron = neuron1 - neuron0 + 1;
 
     std::cerr << "importing " << nNeuron << " neurons " << neuron0
-        << " to " << neuron1 << " from " << inputDir << "...";
+        << " to " << neuron1 << " from " << inputDir << " write geometry"
+        << EYESNO(!writeGeom) << " write mesh" << EYESNO(!writeMesh)
+        << " data will be stored in " << outputDir << " at " << outputFile << "...";
     t0 = std::chrono::high_resolution_clock::now();
 
     std::vector<neuron::Neuron<index_t,coord_t,data_t>> neurons(nNeuron);

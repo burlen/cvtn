@@ -2762,7 +2762,7 @@ struct TimeSeries
         for (index_t i = 0; i < nNeurons; ++i)
             raMap[i] = i;
 
-        std::sort(raMap, raMap+nNeurons, lessThan(neuronIds));
+        std::sort(raMap, raMap+nNeurons, lessThan<index_t>(neuronIds));
 
         return 0;
     }

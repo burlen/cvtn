@@ -21,7 +21,21 @@ int main(int argc, char **argv)
         std::cerr << "Usage: cvt [input dir] [first neuron] "
             << "[last neuron] [first step] [last step] [num cells] "
             << "[output dir] [out file] [write geom] [write mesh] "
-            << "[n threads]" << std::endl;
+            << "[n threads]" << std::endl
+            << std::endl
+            << "  input dir - path where seg_coords and im.h live" << std::endl
+            << "  first neuron - decimal number of the first neuron to load" << std::endl
+            << "  last neuron - decimal number of the last neuron to load" << std::endl
+            << "  first step - index of the first time step to load" << std::endl
+            << "  last step - index of the last time step to load" << std::endl
+            << "  num cells - number of cells in the longest side of the Cartesian mesh" << std::endl
+            << "  output dir - path where to write the data as VTK files" << std::endl
+            << "  out file - name of the data set" << std::endl
+            << "  write geometry - 0/1 if 1 compute the neuron geometry" << std::endl
+            << "  write mesh - 0/1 if 1 sample the scalar field onto a " << std::endl
+            << "               regular Cratesian mesh" << std::endl
+            << "  n threads - number of threads to use (optional)" << std::endl
+            << std::endl;
         return -1;
     }
 

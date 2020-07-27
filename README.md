@@ -34,13 +34,12 @@ make -j install
 ```
 
 ### HDF5
-Any recent version of HDF5 should suffice. One might simply use a package manager.
-for example: `sudo apt-get install gdf5-devel` or `brew install hdf5` etc etc.
+Any recent version of HDF5 installed by a package manager should suffice.
 
 ### Intel TBB
+A recent version installed from a package manager should suffice.
 
-
-## Install
+## Installing the converter
 Once VTK, HDF5, and Intel TBB are installed one can install the converter.
 
 ```
@@ -50,21 +49,30 @@ cmake -DVTK_DIR=../VTK-8.2.0-build/  ../cvtn
 make
 ```
 
-## Use
+## Using the converter
 
 ```
 cvt [input dir] [first neuron] [last neuron] [first step] [last step]
     [num cells] [output dir] [out file] [write geom] [write mesh] [n threads]
 ```
 **input dir** : path where seg_coords and im.h live
-**first neuron** : decimal number of the first neuron to load
-**last neuron** : decimal number of the last neuron to load
-**first step** : index of the first time step to load
-**last step** : index of the last time step to load
-**num cells** : number of cells in the longest side of the 3D Cartesian mesh.
-**output dir** : path where to write the data as VTK files
-**out file** : a name that's used when writeing output files
-**write geometry** : 0/1 if 1 compute the neuron geometry
-**write mesh** : 0/1 if 1 sample the scalar field onto a regular Cratesian mesh
-**n threads** : number of threads to use (optional)
 
+**first neuron** : decimal number of the first neuron to load
+
+**last neuron** : decimal number of the last neuron to load
+
+**first step** : index of the first time step to load
+
+**last step** : index of the last time step to load
+
+**num cells** : number of cells in the longest side of the 3D Cartesian mesh.
+
+**output dir** : path where to write the data as VTK files
+
+**out file** : a name that's used when writeing output files
+
+**write geometry** : 0/1 if 1 compute the neuron geometry
+
+**write mesh** : 0/1 if 1 sample the scalar field onto a regular Cratesian mesh
+
+**n threads** : number of threads to use (optional)

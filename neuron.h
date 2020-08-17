@@ -1280,6 +1280,12 @@ int appendNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
     index_t nPtsAlready = coords->GetNumberOfTuples();
 
     // convert cells into VTK's format
+#if defined(VTK_CELL_ARRAY_V2)
+    // new VTK 9.0.0 format
+    vtkIdType cpts = nPtsAlready;
+    cellArray->InsertNextCell(1, &cpts);
+#else
+    // the old VTK 8.X.X and earlier format
     vtkIdTypeArray *cellIds = cellArray->GetData();
     vtkIdType * __restrict__ dst = cellIds->WritePointer(
         cellIds->GetNumberOfTuples(), 2*nCellsOut);
@@ -1290,6 +1296,7 @@ int appendNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
     cao->SetCells(nCellsOut + nCellsAlready, cellIds);
     dataset->SetVerts(cao);
     cao->Delete();
+#endif
 
     // deep copy points
     coord_t * __restrict__ pcoords
@@ -1363,6 +1370,11 @@ int packageNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
     index_t nPtsOut = 1;
 
     // add a vertex for the root node.
+    vtkCellArray *cellArray = vtkCellArray::New();
+#if defined(VTK_CELL_ARRAY_V2)
+    vtkIdType cpts = 0;
+    cellArray->InsertNextCell(1, &cpts);
+#else
     // cell array
     vtkIdTypeArray *cellIds = vtkIdTypeArray::New();
     cellIds->SetName("cellIds");
@@ -1371,9 +1383,9 @@ int packageNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
     cids[0] = 1;
     cids[1] = 0;
 
-    vtkCellArray *cellArray = vtkCellArray::New();
     cellArray->SetCells(nCellsOut, cellIds);
     cellIds->Delete();
+#endif
 
     // point coordinates
     vtkAOSDataArrayTemplate<coord_t> *coords =
@@ -1822,6 +1834,43 @@ int appendCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
     index_t nPtsAlready = coords->GetNumberOfTuples();
 
     // convert cells into VTK's format
+#if defined(VTK_CELL_ARRAY_V2)
+    // append offsets
+    vtkTypeInt64Array *cofs = dynamic_cast<vtkTypeInt64Array*>(
+        cellArray->GetOffsetsArray());
+
+    assert(cofs);
+
+    vtkTypeInt64 * __restrict__ pcofs = cofs->WritePointer(
+        nCellsAlready, nCellsOut + 1);
+
+    vtkIdType ofs = pcofs[0];
+    for (index_t i = 1; i < nCells; ++i)
+    {
+        ofs += cellLens[i];
+        pcofs[i] = ofs;
+    }
+
+    // append connectivity
+    vtkTypeInt64Array *cpts = dynamic_cast<vtkTypeInt64Array*>(
+        cellArray->GetConnectivityArray());
+
+    assert(cpts);
+
+    vtkTypeInt64 cellArraySizeAlready = cpts->GetNumberOfTuples();
+
+    vtkTypeInt64 * __restrict__ dst = cpts->WritePointer(
+        cellArraySizeAlready, cellArraySizeOut);
+
+    for (index_t i = 1; i < nCells; ++i)
+    {
+        index_t * __restrict__ src = cells + cellLocs[i];
+        index_t cellLen = cellLens[i];
+        for (index_t j = 0; j < cellLen; ++j)
+            dst[j] = src[j] - nRtPts + nPtsAlready;
+        dst += cellLen;
+    }
+#else
     vtkIdTypeArray *cellIds = cellArray->GetData();
     vtkIdType * __restrict__ dst = cellIds->WritePointer(
         cellIds->GetNumberOfTuples(), cellArraySizeOut + nCellsOut);
@@ -1840,6 +1889,7 @@ int appendCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
     cao->SetCells(nCellsAlready + nCellsOut, cellIds);
     dataset->SetLines(cao);
     cao->Delete();
+#endif
 
     // deep copy points
     coord_t * __restrict__ pcoords
@@ -1917,6 +1967,40 @@ int packageCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
     index_t cellArraySizeOut = cellArraySize - nRtPts;
 
     // convert cells into VTK's format
+    vtkCellArray *cellArray = vtkCellArray::New();
+
+#if defined(VTK_CELL_ARRAY_V2)
+    // append offsets
+    vtkTypeInt64Array *cofs = dynamic_cast<vtkIdType*>(
+        cellArray->GetOffsetsArray());
+
+    assert(cofs);
+
+    vtkTypeInt64 * __restrict__ pcofs = cofs->WritePointer(0, nCellsOut + 1);
+
+    for (index_t i = 1; i < nCells; ++i)
+    {
+        pcofs[i] = cellLocs[i];
+    }
+
+    // append connectivity
+    vtkTypeInt64Array *cpts = dynamic_cast<vtkIdType*>(
+        cellArray->GetConnectivityArray());
+
+    assert(cpts);
+
+    vtkTypeInt64 * __restrict__ dst = cpts->WritePointer(
+        0, cellArraySizeOut);
+
+    for (index_t i = 1; i < nCells; ++i)
+    {
+        index_t * __restrict__ src = cells + cellLocs[i];
+        index_t cellLen = cellLens[i];
+        for (index_t j = 0; j < cellLen; ++j)
+            dst[j] = src[j] - nRtPts;
+        dst += cellLen;
+    }
+#else
     vtkIdTypeArray *cellIds = vtkIdTypeArray::New();
     cellIds->SetName("cellIds");
     cellIds->SetNumberOfTuples(cellArraySizeOut + nCellsOut);
@@ -1932,9 +2016,9 @@ int packageCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
         dst += cellLen;
     }
 
-    vtkCellArray *cellArray = vtkCellArray::New();
     cellArray->SetCells(nCellsOut, cellIds);
     cellIds->Delete();
+#endif
 
 #if defined(ZERO_COPY_VTK)
     // zero copy points

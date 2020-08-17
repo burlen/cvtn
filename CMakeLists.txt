@@ -39,17 +39,14 @@ message(STATUS "CMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
 
 # VTK
 # for VTK 8.2.0 use "vtk" and for 9.0.0 on use ""
-set(vtk_ver 8)
-set(vtk_mod_prefix)
-if (vtk_ver EQUAL 8)
-    set(vtk_mod_prefix vtk)
-endif()
+set(vtk_mod_prefix vtk)
 find_package(VTK COMPONENTS
     ${vtk_mod_prefix}CommonCore
     ${vtk_mod_prefix}CommonDataModel
     ${vtk_mod_prefix}IOCore
     ${vtk_mod_prefix}IOLegacy
     ${vtk_mod_prefix}IOParallelXML
+    QUIET
     REQUIRED)
 include_directories(${VTK_INCLUDE_DIRS})
 
@@ -65,6 +62,6 @@ add_executable(cvt cvt.cpp neuron.cpp neuron_types.cpp)
 target_link_libraries(cvt ${TBB_LIBRARIES}
     ${HDF5_HL_LIBRARIES} ${HDF5_C_LIBRARIES} ${VTK_LIBRARIES})
 
-if (vtk_ver GREATER 8)
+if (VTK_VERSION_MAJOR GREATER 8)
     vtk_module_autoinit(TARGETS cvt MODULES ${VTK_LIBRARIES})
 endif()

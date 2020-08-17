@@ -82,6 +82,15 @@ extern tbb::queuing_mutex ioMutex;
 #define EYESNO(_er) (_er == 0 ? "(yes)" : "(no)")
 
 // --------------------------------------------------------------------------
+int readNumDimensions(hid_t fh, const char *dsname, int &nDims)
+{
+    // get number of dimensions
+    if (H5LTget_dataset_ndims(fh, dsname, &nDims) < 0)
+        return -1;
+    return 0;
+}
+
+// --------------------------------------------------------------------------
 int readDimensions(hid_t fh, const char *dsname, hsize_t *dims,
     int nDimsReq=1, hsize_t *dimsReq=nullptr)
 {
@@ -275,8 +284,8 @@ template<> struct cppH5Tt<char **>
 
 // --------------------------------------------------------------------------
 template <typename index_t, typename data_t>
-int readTimeStep(hid_t fh, index_t nSteps, index_t stepSize, index_t step,
-    data_t *&data)
+int readTimeStep(hid_t fh, index_t nSteps, index_t stepSize, int nScalars,
+    index_t step, data_t *data[2])
 {
     if (fh < 0)
     {
@@ -292,54 +301,83 @@ int readTimeStep(hid_t fh, index_t nSteps, index_t stepSize, index_t step,
         return -1;
     }
 
-    hid_t dset = H5Dopen(fh, "/data", H5P_DEFAULT);
-
-    // select the time step
-    hsize_t foffs[2] = {hsize_t(step), 0};
-    hsize_t fsize[2] = {1, hsize_t(stepSize)};
-    hid_t fdsp = H5Dget_space(dset);
-    if (H5Sselect_hyperslab(fdsp, H5S_SELECT_SET, foffs, nullptr, fsize, nullptr) < 0)
+    // deal with the tomfoolery coming out of BMTK  output format
+    const char *dsetName[2];
+    if (nScalars == 1)
+    {
+        dsetName[0] = "/data";
+        dsetName[1] = nullptr;
+    }
+    else if (nScalars == 2)
+    {
+        dsetName[0] = "/im/data";
+        dsetName[1] = "/v/data";
+    }
+    else
     {
         H5Fclose(fh);
         fh = -1;
-        ERROR("Failed to select time step" << step)
+        ERROR("Only at most 2 scalars are allowed")
         return -1;
     }
 
-    // allocate a buffer of the right side if needed
-    if (data == nullptr)
-        data = (data_t*)MALLOC(stepSize*sizeof(data_t));
-
-    // read it in
-    hid_t mdsp = H5Screate_simple(1, &fsize[1], nullptr);
-    if (H5Dread(dset, cppH5Tt<data_t>::typeCode(), mdsp, fdsp, H5P_DEFAULT, data) < 0)
+    for (int i = 0; i < nScalars; ++i)
     {
-        free(data);
-        data = nullptr;
+        hid_t dset = H5Dopen(fh, dsetName[i], H5P_DEFAULT);
+        if (dset < 0)
+        {
+            H5Fclose(fh);
+            fh = -1;
+            ERROR("Failed to ope3n the dataset " << dsetName[i])
+            return -1;
+        }
+
+        // select the time step
+        hsize_t foffs[2] = {hsize_t(step), 0};
+        hsize_t fsize[2] = {1, hsize_t(stepSize)};
+        hid_t fdsp = H5Dget_space(dset);
+        if (H5Sselect_hyperslab(fdsp, H5S_SELECT_SET, foffs, nullptr, fsize, nullptr) < 0)
+        {
+            H5Fclose(fh);
+            fh = -1;
+            ERROR("Failed to select time step " << step << " for " << dsetName[i])
+            return -1;
+        }
+
+        // allocate a buffer of the right side if needed
+        if (data[i] == nullptr)
+            data[i] = (data_t*)MALLOC(stepSize*sizeof(data_t));
+
+        // read it in
+        hid_t mdsp = H5Screate_simple(1, &fsize[1], nullptr);
+        if (H5Dread(dset, cppH5Tt<data_t>::typeCode(), mdsp, fdsp, H5P_DEFAULT, data[i]) < 0)
+        {
+            free(data[i]);
+            data[i] = nullptr;
+            H5Sclose(mdsp);
+            H5Sclose(fdsp);
+            H5Dclose(dset);
+            H5Fclose(fh);
+            fh = -1;
+            ERROR("Failed to read time step " << step << " for " << dsetName[i])
+            return -1;
+        }
+
         H5Sclose(mdsp);
         H5Sclose(fdsp);
         H5Dclose(dset);
-        H5Fclose(fh);
-        fh = -1;
-        ERROR("Failed to read time step  " << step)
-        return -1;
+        //H5Fclose(fh);
     }
-
-    H5Sclose(mdsp);
-    H5Sclose(fdsp);
-    H5Dclose(dset);
-    //H5Fclose(fh);
 
     return 0;
 }
 
 // --------------------------------------------------------------------------
 template <typename index_t, typename data_t>
-int readTimeSeriesMetadata(const std::string &baseDir,
-    hid_t &fh,
-    index_t &nNeurons, index_t &nSteps, index_t &stepSize, char *&name,
-    data_t &t0, data_t &t1, data_t &dt,
-    index_t *&neuronIds, index_t *&neuronOffs, index_t *&neuronSize)
+int readTimeSeriesMetadata(const std::string &baseDir, hid_t &fh,
+    index_t &nNeurons, index_t &nSteps, index_t &stepSize, int &nScalars,
+    char *name[2], data_t &t0, data_t &t1, data_t &dt, index_t *&neuronIds,
+    index_t *&neuronOffs, index_t *&neuronSize)
 {
     tbb::queuing_mutex::scoped_lock lock(ioMutex);
 
@@ -356,21 +394,13 @@ int readTimeSeriesMetadata(const std::string &baseDir,
         }
     }
 
-    // read the scalar name
-    if (cppH5Tt<char**>::readAttribute(fh, "/data", "variable_name", name))
-    {
-        H5Fclose(fh);
-        fh = -1;
-        ERROR("failed to read variable name")
-        return -1;
-    }
-
     // read time metadata
     hsize_t dims[2] = {0};
     data_t tmd[3] = {data_t(0)};
     if (readDimensions(fh, "/mapping/time", dims, 1, 3) ||
         cppH5Tt<double>::readDataset(fh, "/mapping/time", tmd))
     {
+        ERROR("Failed to read time metadata")
         H5Fclose(fh);
         fh = -1;
         return -1;
@@ -379,8 +409,39 @@ int readTimeSeriesMetadata(const std::string &baseDir,
     t1 = tmd[1];
     dt = tmd[2];
 
+    // attempt to detect the file format. Vyassa's using some broken bmtk code
+    // and we need to attempt to work through a number of cases depending on
+    // what that code has done.
+    nScalars = 0;
+    int nDims = 0;
+    const char *dsetName = nullptr;
+    if (readNumDimensions(fh, "/data", nDims) == 0)
+    {
+        nScalars = 1;
+        name[0] = strdup("im");
+        name[1] = nullptr;
+        dsetName = "/data";
+    }
+    else if ((readNumDimensions(fh, "/im/data", nDims) == 0) &&
+        (readNumDimensions(fh, "/v/data", nDims) == 0))
+    {
+        nScalars = 2;
+        name[0] = strdup("im");
+        name[1] = strdup("v");
+        dsetName = "/im/data";
+
+    }
+    else
+    {
+        ERROR("Failed to detect file format. Expected either \"/data\" "
+            "or \"/data/im\" and \"/data/v\"")
+        H5Fclose(fh);
+        fh = -1;
+        return -1;
+    }
+
     // get size of buffers for time series
-    if (readDimensions(fh, "/data", dims, 2))
+    if (readDimensions(fh, dsetName, dims, nDims))
     {
         H5Fclose(fh);
         fh = -1;
@@ -1186,8 +1247,8 @@ int appendNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
     coord_t * __restrict__ d, index_t nCells, index_t * __restrict__ cells,
     index_t * __restrict__ cellLens, index_t * __restrict__ cellLocs,
     index_t cellArraySize, coord_t * __restrict__ dist,
-    coord_t * __restrict__ thick, data_t * __restrict__ scalar,
-    const char *scalarName,  coord_t *pos, int e_type, int m_type, int ei,
+    coord_t * __restrict__ thick, data_t * __restrict__ scalar[2],
+    const char *scalarName[2],  coord_t *pos, int e_type, int m_type, int ei,
     int layer, int active, vtkPolyData *&dataset)
 {
     assert(cellLens[0] == 3);
@@ -1254,22 +1315,26 @@ int appendNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
     memcpy(rad->WritePointer(nPtsAlready, nPtsOut),
         &r, nPtsOut*sizeof(coord_t));
 
-    if (scalar)
+    for (int i = 0; i < 2; ++i)
     {
-        // scalar
-        // differentiate the scalar so that a different color scale range can be used
-        char buf[128];
-        snprintf(buf, 127, "%s_n", scalarName);
-        vtkAOSDataArrayTemplate<data_t> *sa =
-            dynamic_cast<vtkAOSDataArrayTemplate<data_t>*>(
-                dataset->GetPointData()->GetArray(buf));
-        memcpy(sa->WritePointer(nPtsAlready, nPtsOut),
-            &scalar[1], nPtsOut*sizeof(data_t));
+        if (scalar[i])
+        {
+            // scalar
+            // differentiate the scalar so that a different color scale range can be used
+            char buf[128];
+            snprintf(buf, 127, "%s_n", scalarName[i]);
+            vtkAOSDataArrayTemplate<data_t> *sa =
+                dynamic_cast<vtkAOSDataArrayTemplate<data_t>*>(
+                    dataset->GetPointData()->GetArray(buf));
+            memcpy(sa->WritePointer(nPtsAlready, nPtsOut),
+                &(scalar[i])[1], nPtsOut*sizeof(data_t));
+        }
     }
 
     return 0;
 }
 
+/*
 // --------------------------------------------------------------------------
 template<typename index_t, typename coord_t, typename data_t>
 int packageNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
@@ -1458,10 +1523,11 @@ int packageNodesVtk(int id, index_t nPts, coord_t * __restrict__ x,
 
     return 0;
 }
+*/
 
 // --------------------------------------------------------------------------
 template<typename index_t, typename coord_t, typename data_t>
-vtkPolyData *allocNodesVtk(const char *scalarName)
+vtkPolyData *allocNodesVtk(const char *scalarName[2])
 {
     // allocate and initialize the dataset
     vtkPolyData *dataset = vtkPolyData::New();
@@ -1565,17 +1631,20 @@ vtkPolyData *allocNodesVtk(const char *scalarName)
     dataset->GetPointData()->AddArray(radius);
     radius->Delete();
 
-    // scalar
-    if (scalarName)
+    // scalars
+    for (int i = 0; i < 2; ++i)
     {
-        // differentiate the scalar so that a different color scale range can be used
-        char buf[128];
-        snprintf(buf, 127, "%s_n", scalarName);
-        vtkAOSDataArrayTemplate<data_t> *sa =
-            vtkAOSDataArrayTemplate<data_t>::New();
-        sa->SetName(buf);
-        dataset->GetPointData()->AddArray(sa);
-        sa->Delete();
+        if (scalarName[i])
+        {
+            // differentiate the scalar so that a different color scale range can be used
+            char buf[128];
+            snprintf(buf, 127, "%s_n", scalarName[i]);
+            vtkAOSDataArrayTemplate<data_t> *sa =
+                vtkAOSDataArrayTemplate<data_t>::New();
+            sa->SetName(buf);
+            dataset->GetPointData()->AddArray(sa);
+            sa->Delete();
+        }
     }
 
     return dataset;
@@ -1583,7 +1652,7 @@ vtkPolyData *allocNodesVtk(const char *scalarName)
 
 // --------------------------------------------------------------------------
 template<typename index_t, typename coord_t, typename data_t>
-vtkPolyData *allocCellsVtk(const char *scalarName)
+vtkPolyData *allocCellsVtk(const char *scalarName[2])
 {
     // allocate and initialize the dataset
     vtkPolyData *dataset = vtkPolyData::New();
@@ -1704,13 +1773,16 @@ vtkPolyData *allocCellsVtk(const char *scalarName)
     diameter->Delete();
 
     // scalar
-    if (scalarName)
+    for (int i = 0; i < 2; ++i)
     {
-        vtkAOSDataArrayTemplate<data_t> *sa =
-            vtkAOSDataArrayTemplate<data_t>::New();
-        sa->SetName(scalarName);
-        dataset->GetPointData()->AddArray(sa);
-        sa->Delete();
+        if (scalarName[i])
+        {
+            vtkAOSDataArrayTemplate<data_t> *sa =
+                vtkAOSDataArrayTemplate<data_t>::New();
+            sa->SetName(scalarName[i]);
+            dataset->GetPointData()->AddArray(sa);
+            sa->Delete();
+        }
     }
 
     return dataset;
@@ -1723,8 +1795,8 @@ int appendCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
     coord_t * __restrict__ d, index_t nCells, index_t * __restrict__ cells,
     index_t * __restrict__ cellLens, index_t * __restrict__ cellLocs,
     index_t cellArraySize, coord_t * __restrict__ dist,
-    coord_t * __restrict__ thick, data_t * __restrict__ scalar,
-    const char *scalarName, coord_t *pos, int e_type, int m_type, int ei,
+    coord_t * __restrict__ thick, data_t * __restrict__ scalar[2],
+    const char *scalarName[2], coord_t *pos, int e_type, int m_type, int ei,
     int layer, int active, vtkPolyData *&dataset)
 {
     (void)pos;
@@ -1770,9 +1842,9 @@ int appendCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
     cao->Delete();
 
     // deep copy points
-    coords->SetNumberOfTuples(nPtsOut);
     coord_t * __restrict__ pcoords
         = coords->WritePointer(3*nPtsAlready, 3*nPtsOut);
+
     for (index_t i = 0, q = nRtPts; i < nPtsOut; ++i, ++q)
     {
         index_t ii = 3*i;
@@ -1807,19 +1879,23 @@ int appendCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
     memcpy(diameter->WritePointer(nPtsAlready, nPtsOut),
         d + nRtPts, nPtsOut*sizeof(coord_t));
 
-    if (scalar)
+    for (int i = 0; i < 2; ++i)
     {
-        // scalar
-        vtkAOSDataArrayTemplate<data_t> *sa =
-            dynamic_cast<vtkAOSDataArrayTemplate<data_t>*>(
-                dataset->GetPointData()->GetArray(scalarName));
-        memcpy(sa->WritePointer(nPtsAlready, nPtsOut),
-            scalar + nRtPts, nPtsOut*sizeof(data_t));
+        if (scalar[i])
+        {
+            // scalar
+            vtkAOSDataArrayTemplate<data_t> *sa =
+                dynamic_cast<vtkAOSDataArrayTemplate<data_t>*>(
+                    dataset->GetPointData()->GetArray(scalarName[i]));
+            memcpy(sa->WritePointer(nPtsAlready, nPtsOut),
+                scalar[i] + nRtPts, nPtsOut*sizeof(data_t));
+        }
     }
 
     return 0;
 }
 
+/*
 // --------------------------------------------------------------------------
 template<typename index_t, typename coord_t, typename data_t>
 int packageCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
@@ -2029,6 +2105,7 @@ int packageCellsVtk(int id, index_t nPts, coord_t * __restrict__ x,
 
     return 0;
 }
+*/
 
 //--------------------------------------------------------------------------
 template<typename index_t, typename coord_t>
@@ -2473,7 +2550,7 @@ struct Neuron
         z(nullptr), d(nullptr), simpleCells(nullptr), nComplexCells(0),
         complexCells(nullptr), complexCellLens(nullptr),
         complexCellLocs(nullptr), complexCellArraySize(0), dist(nullptr),
-        thick(nullptr), scalar(nullptr), scalarName(nullptr), count(nullptr),
+        thick(nullptr), scalar{nullptr}, scalarName{nullptr}, count(nullptr),
         meshIds(nullptr)
     {}
 
@@ -2485,7 +2562,7 @@ struct Neuron
         z(nullptr), d(nullptr), simpleCells(nullptr), nComplexCells(0),
         complexCells(nullptr), complexCellLens(nullptr),
         complexCellLocs(nullptr), complexCellArraySize(0), dist(nullptr),
-        thick(nullptr), scalar(nullptr), scalarName(nullptr), count(nullptr),
+        thick(nullptr), scalar{nullptr}, scalarName{nullptr}, count(nullptr),
         meshIds(nullptr)
     {}
 
@@ -2545,13 +2622,13 @@ struct Neuron
         return meshIds;
     }
 
-    int setScalar(data_t * __restrict__ cellScalar, const char *name)
+    int setScalar(int id, data_t * __restrict__ cellScalar, const char *name)
     {
         // interpolate from simple cells to reduced point set
-        scalarName = name;
+        scalarName[id] = name;
         cellToPoint(simpleCells, nSimpleCells, nPts,
-            count, cellScalar, scalar);
-        active = anyAbove(nPts, scalar, data_t(0.07));
+            count, cellScalar, scalar[id]);
+        active = anyAbove(nPts, scalar[id], data_t(0.07));
         return 0;
     }
 
@@ -2573,7 +2650,8 @@ struct Neuron
         free(complexCellLocs);
         free(dist);
         free(thick);
-        free(scalar);
+        free(scalar[0]);
+        free(scalar[1]);
         free(count);
         free(meshIds);
         nSimpleCells = 0;
@@ -2602,8 +2680,10 @@ struct Neuron
         complexCellArraySize = 0;
         dist = nullptr;
         thick = nullptr;
-        scalar = nullptr;
-        scalarName = nullptr;
+        scalar[0] = nullptr;
+        scalar[1] = nullptr;
+        scalarName[0] = nullptr;
+        scalarName[1] = nullptr;
         count = nullptr;
         meshIds = nullptr;
     }
@@ -2626,7 +2706,7 @@ struct Neuron
             layer, active, block);
     }
 
-    void packageCells(vtkPolyData *&block)
+    /*void packageCells(vtkPolyData *&block)
     {
         // package in VTK format
         packageCellsVtk(neuronId, nPts, x, y, z, d, nComplexCells, complexCells,
@@ -2642,7 +2722,7 @@ struct Neuron
             complexCellLens, complexCellLocs, complexCellArraySize,
             dist, thick, scalar, scalarName, spos, e_type, m_type, ei,
             layer, block);
-    }
+    }*/
 
     int blockId;
     int neuronId;
@@ -2674,8 +2754,8 @@ struct Neuron
     index_t complexCellArraySize;
     coord_t *dist;
     coord_t *thick;
-    data_t *scalar;
-    const char *scalarName;
+    data_t *scalar[2];
+    const char *scalarName[2];
     index_t *count;
     index_t *meshIds;
 };
@@ -2724,17 +2804,17 @@ template <typename index_t, typename coord_t, typename data_t>
 struct TimeSeries
 {
     TimeSeries() : baseDir(nullptr), fh(-1), t0(-1.), t1(-1.), dt(-1.),
-        nNeurons(0), nSteps(0), stepSize(0), neuronIds(nullptr),
+        nNeurons(0), nSteps(0), stepSize(0), nScalars(0), neuronIds(nullptr),
         neuronOffs(nullptr), neuronSize(nullptr), raMap(nullptr),
-        scalar(nullptr), scalarName(nullptr), neurons(nullptr)
+        scalar{nullptr}, scalarName{nullptr}, neurons(nullptr)
     {}
 
     TimeSeries(const char *baseDir,
         std::vector<Neuron<index_t,coord_t,data_t>> *nrns) :
         baseDir(baseDir), fh(-1), t0(-1.), t1(-1.), dt(-1.),
-        nNeurons(0), nSteps(0), stepSize(0), neuronIds(nullptr),
+        nNeurons(0), nSteps(0), stepSize(0), nScalars(0), neuronIds(nullptr),
         neuronOffs(nullptr), neuronSize(nullptr), raMap(nullptr),
-        scalar(nullptr), scalarName(nullptr), neurons(nrns)
+        scalar{nullptr}, scalarName{nullptr}, neurons(nrns)
     {}
 
     ~TimeSeries() {}
@@ -2748,8 +2828,8 @@ struct TimeSeries
     int initialize()
     {
         if (readTimeSeriesMetadata(baseDir, fh, nNeurons, nSteps,
-            stepSize, scalarName, t0, t1, dt, neuronIds, neuronOffs,
-            neuronSize))
+            stepSize, nScalars, scalarName, t0, t1, dt, neuronIds,
+            neuronOffs, neuronSize))
         {
             ERROR("Failed to import time series metadata")
             return -1;
@@ -2770,7 +2850,7 @@ struct TimeSeries
     int importTimeStep(index_t step)
     {
         // read this time step
-        if (readTimeStep(fh, nSteps, stepSize, step, scalar))
+        if (readTimeStep(fh, nSteps, stepSize, nScalars, step, scalar))
         {
             ERROR("Failed to read time step " << step)
             return -1;
@@ -2781,16 +2861,17 @@ struct TimeSeries
         for (index_t i = 0; i < nnrn; ++i)
         {
             neuron::Neuron<index_t, coord_t, data_t> &ni = (*neurons)[i];
-            ni.setScalar(getScalar(ni.neuronId), scalarName);
+            for (int j = 0; j < nScalars; ++j)
+                ni.setScalar(j, getScalar(j, ni.neuronId), scalarName[j]);
         }
 
         return 0;
     }
 
-    data_t *getScalar(index_t nid)
+    data_t *getScalar(int sid, index_t nid)
     {
         // return a pointer to the start of this neurons data
-        return scalar + neuronOffs[raMap[nid]];
+        return scalar[sid] + neuronOffs[raMap[nid]];
     }
 
     void freeMem()
@@ -2799,8 +2880,10 @@ struct TimeSeries
         free(neuronOffs);
         free(neuronSize);
         free(raMap);
-        free(scalar);
-        free(scalarName);
+        free(scalar[0]);
+        free(scalar[1]);
+        free(scalarName[0]);
+        free(scalarName[1]);
         H5Fclose(fh);
         fh = -1;
     }
@@ -2808,7 +2891,9 @@ struct TimeSeries
     void print()
     {
         std::cerr << "nNeurons=" << nNeurons << ", nSteps=" << nSteps
-            << ", stepSize=" << stepSize << ", scalarName=" << scalarName
+            << ", stepSize=" << stepSize
+            << ", scalarName[0]=" << (scalarName[0] ? scalarName[0] : "none")
+            << ", scalarName[1]=" << (scalarName[1] ? scalarName[1] : "none")
             << " t0=" << t0 << ", t1=" << t1 << ", dt=" <<  dt << std::endl;
 #if defined(MEM_CHECK)
         std::cerr << "access structs (" << nNeurons << ") = ";
@@ -2830,12 +2915,13 @@ struct TimeSeries
     index_t nNeurons;
     index_t nSteps;
     index_t stepSize;
+    int nScalars;
     index_t *neuronIds;
     index_t *neuronOffs;
     index_t *neuronSize;
     index_t *raMap;
-    data_t *scalar;
-    char *scalarName;
+    data_t *scalar[2];
+    char *scalarName[2];
     std::vector<Neuron<index_t,coord_t,data_t>> *neurons;
 };
 
@@ -2926,7 +3012,7 @@ struct Mesher
     }
 
     template<template<typename,typename> typename op_t>
-    void mesh(op_t<index_t, coord_t> &op)
+    void mesh(op_t<index_t, coord_t> &op, int sid)
     {
         op.initialize(nCells);
 
@@ -2934,7 +3020,7 @@ struct Mesher
         for (int i = 0; i < nNeuron; ++i)
         {
             const Neuron<index_t,coord_t,data_t> &ni = (*neurons)[i];
-            op.reduce(ni.nPts, ni.meshIds, ni.scalar);
+            op.reduce(ni.nPts, ni.meshIds, ni.scalar[sid]);
         }
 
        op.finalize();
@@ -3142,8 +3228,10 @@ struct Exporter
         tbb::parallel_for(size_t(0), size_t(nNeuron), size_t(1),
             [&](size_t i)
             {
-                vtkPolyData *block = nullptr;
-                (*neurons)[i].packageCells(block);
+                vtkPolyData *block = allocCellsVtk<index_t,coord_t,data_t>(
+                    (*neurons)[i].scalarName);
+
+                (*neurons)[i].appendCells(block);
                 cmbds->SetBlock(i, block);
                 block->Delete();
             });
@@ -3160,8 +3248,10 @@ struct Exporter
         tbb::parallel_for(size_t(0), size_t(nNeuron), size_t(1),
             [&](size_t i)
             {
-                vtkPolyData *block = nullptr;
-                (*neurons)[i].packageNodes(block);
+                vtkPolyData *block = allocNodesVtk<index_t,coord_t,data_t>(
+                    (*neurons)[i].scalarName);
+
+                (*neurons)[i].appendNodes(block);
                 nmbds->SetBlock(i, block);
                 block->Delete();
             });

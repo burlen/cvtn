@@ -73,6 +73,10 @@ int main(int argc, char **argv)
         << 1.e-6*std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()
         << "s)" << std::endl
         << "intializing time series, mesher, and exporter...";
+
+    // disable hdf5 error spew.
+    H5Eset_auto2(H5E_DEFAULT, nullptr, nullptr);
+
     t0 = std::chrono::high_resolution_clock::now();
 
     // initailze time series handlers
@@ -88,8 +92,18 @@ int main(int argc, char **argv)
     if (exporter.initialize(outputDir, outputFile, mesher))
         return -1;
 
-    neuron::ReduceAverage<index_t, data_t> avg(timeSeries.scalarName);
-    neuron::ReduceMaxAbs<index_t, data_t> mxa(timeSeries.scalarName);
+    int nScalars = timeSeries.nScalars;
+    std::vector<neuron::ReduceAverage<index_t, data_t>*> avg(nScalars);
+    for (int i = 0; i < nScalars; ++i)
+        avg[i] = new neuron::ReduceAverage<index_t, data_t>(timeSeries.scalarName[i]);
+
+    std::vector<neuron::ReduceMaxAbs<index_t, data_t>*> mxa(nScalars);
+    for (int i = 0; i < nScalars; ++i)
+        mxa[i] = new neuron::ReduceMaxAbs<index_t, data_t>(timeSeries.scalarName[i]);
+
+    int nReductions = 2*nScalars;
+    std::vector<const char *>names(nReductions);
+    std::vector<data_t *>arrays(nReductions);
 
     t1 = std::chrono::high_resolution_clock::now();
     std::cerr << "done! ("
@@ -99,6 +113,7 @@ int main(int argc, char **argv)
     mesher.print();
 
     // process each time step
+    step1 = (step1 > 0 ? step1 :timeSeries.nSteps - 1);
     int nSteps = step1 - step0 + 1;
     std::cerr << "processing " << nSteps << "..." << std::endl;
     for (int i = step0; i <= step1; ++i)
@@ -112,18 +127,31 @@ int main(int argc, char **argv)
         if (writeMesh)
         {
             // interpolate neuron values onto the mesh
-            mesher.mesh(avg);
-            mesher.mesh(mxa);
+            for (int j = 0; j < nScalars; ++j)
+            {
+                // interpolate (average)
+                mesher.mesh(*(avg[j]), j);
+                // marshall results
+                names[j] = avg[j]->getName();
+                arrays[j] = avg[j]->getResult();
+
+                // interpolate (maximum)
+                mesher.mesh(*(mxa[j]), j);
+                // marshall results
+                int jj = 2*j;
+                names[jj] = mxa[j]->getName();
+                arrays[jj] = mxa[j]->getResult();
+            }
 
             // export the mesh
-            const char *names[] = {avg.getName(), mxa.getName()};
-            data_t *arrays[] = {avg.getResult(), mxa.getResult()};
-
-            if (exporter.writeMesh(i, 2, arrays, names))
+            if (exporter.writeMesh(i, timeSeries.nScalars, arrays.data(), names.data()))
                 return -1;
 
-            avg.freeMem();
-            mxa.freeMem();
+            for (int j = 0; j < nScalars; ++j)
+            {
+                avg[j]->freeMem();
+                mxa[j]->freeMem();
+            }
         }
 
         if (writeGeom)
@@ -137,6 +165,12 @@ int main(int argc, char **argv)
         std::cerr << "done! ("
             << 1.e-6*std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()
             << "s)" << std::endl;
+    }
+
+    for (int i = 0; i < nScalars; ++i)
+    {
+        delete avg[i];
+        delete mxa[i];
     }
 
 

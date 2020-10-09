@@ -2720,13 +2720,14 @@ struct Neuron
         return meshIds;
     }
 
-    int setScalar(int id, data_t * __restrict__ cellScalar, const char *name)
+    int setScalar(int id, data_t * __restrict__ cellScalar,
+        const char *name, data_t threshold = 0.07)
     {
         // interpolate from simple cells to reduced point set
         scalarName[id] = name;
         cellToPoint(simpleCells, nSimpleCells, nPts,
             count, cellScalar, scalar[id]);
-        active = anyAbove(nPts, scalar[id], data_t(0.07));
+        active = anyAbove(nPts, scalar[id], threshold);
         return 0;
     }
 
@@ -2904,7 +2905,8 @@ struct TimeSeries
     TimeSeries() : baseDir(nullptr), fh(-1), t0(-1.), t1(-1.), dt(-1.),
         nNeurons(0), nSteps(0), stepSize(0), nScalars(0), neuronIds(nullptr),
         neuronOffs(nullptr), neuronSize(nullptr), raMap(nullptr),
-        scalar{nullptr}, scalarName{nullptr}, neurons(nullptr)
+        scalar{nullptr}, scalarName{nullptr},
+        threshold{0.07, std::numeric_limits<data_t>::lowest()}, neurons(nullptr)
     {}
 
     TimeSeries(const char *baseDir,
@@ -2912,7 +2914,8 @@ struct TimeSeries
         baseDir(baseDir), fh(-1), t0(-1.), t1(-1.), dt(-1.),
         nNeurons(0), nSteps(0), stepSize(0), nScalars(0), neuronIds(nullptr),
         neuronOffs(nullptr), neuronSize(nullptr), raMap(nullptr),
-        scalar{nullptr}, scalarName{nullptr}, neurons(nrns)
+        scalar{nullptr}, scalarName{nullptr},
+        threshold{0.07, std::numeric_limits<data_t>::lowest()}, neurons(nrns)
     {}
 
     ~TimeSeries() {}
@@ -2923,7 +2926,7 @@ struct TimeSeries
     TimeSeries &operator=(const TimeSeries &) = delete;
     TimeSeries &operator=(TimeSeries &&) = default;
 
-    int initialize()
+    int initialize(data_t *thresh = nullptr)
     {
         if (readTimeSeriesMetadata(baseDir, fh, nNeurons, nSteps,
             stepSize, nScalars, scalarName, t0, t1, dt, neuronIds,
@@ -2941,6 +2944,13 @@ struct TimeSeries
             raMap[i] = i;
 
         std::sort(raMap, raMap+nNeurons, lessThan<index_t>(neuronIds));
+
+        // copy threshold
+        if (thresh)
+        {
+            for (int i = 0; i < nScalars; ++i)
+                threshold[i] = thresh[i];
+        }
 
         return 0;
     }
@@ -2960,7 +2970,8 @@ struct TimeSeries
         {
             neuron::Neuron<index_t, coord_t, data_t> &ni = (*neurons)[i];
             for (int j = 0; j < nScalars; ++j)
-                ni.setScalar(j, getScalar(j, ni.neuronId), scalarName[j]);
+                ni.setScalar(j, getScalar(j,
+                    ni.neuronId), scalarName[j], threshold[j]);
         }
 
         return 0;
@@ -3012,6 +3023,8 @@ struct TimeSeries
             << ", stepSize=" << stepSize
             << ", scalarName[0]=" << (scalarName[0] ? scalarName[0] : "none")
             << ", scalarName[1]=" << (scalarName[1] ? scalarName[1] : "none")
+            << ", threshold[0]=" << threshold[0]
+            << ", threshold[1]=" << threshold[1]
             << " t0=" << t0 << ", t1=" << t1 << ", dt=" <<  dt << std::endl;
 #if defined(MEM_CHECK)
         std::cerr << "access structs (" << nNeurons << ") = ";
@@ -3040,6 +3053,7 @@ struct TimeSeries
     index_t *raMap;
     data_t *scalar[2];
     char *scalarName[2];
+    data_t threshold[2];
     std::vector<Neuron<index_t,coord_t,data_t>> *neurons;
 };
 

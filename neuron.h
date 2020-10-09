@@ -47,6 +47,20 @@
 #define MALLOC(_nbytes) \
     aligned_alloc(ALIGN_TO, _nbytes)
 
+#define SWAP(_name)                         \
+    auto _name ## Tmp = other._name;    \
+    other._name = _name;                    \
+    _name = _name ## Tmp;
+
+#define SWAP_VEC(_name, _len)                       \
+    for (int i = 0; i < _len; ++i)                  \
+    {                                               \
+        typename std::remove_extent<decltype(_name)>::type  \
+            _name ## Tmp = other._name[i];          \
+        other._name[i] = _name[i];                  \
+        _name[i] = _name ## Tmp;                    \
+    }
+
 
 namespace neuron
 {
@@ -2970,6 +2984,26 @@ struct TimeSeries
         free(scalarName[1]);
         H5Fclose(fh);
         fh = -1;
+    }
+
+    void swap(TimeSeries &other)
+    {
+        SWAP(baseDir)
+        SWAP(fh)
+        SWAP(t0)
+        SWAP(t1)
+        SWAP(dt)
+        SWAP(nNeurons)
+        SWAP(nSteps)
+        SWAP(stepSize)
+        SWAP(nScalars)
+        SWAP(neuronIds)
+        SWAP(neuronOffs)
+        SWAP(neuronSize)
+        SWAP(raMap)
+        SWAP_VEC(scalar, 2)
+        SWAP_VEC(scalarName, 2)
+        SWAP(neurons)
     }
 
     void print()

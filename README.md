@@ -1,4 +1,9 @@
-# Convert neuron simulation data into a format readable by ParaView
+# Tools for visualization of BMTK output using ParaView
+[cvtn](##cvtn) **A command line aplication to convert BMTK/neuron simulation data**
+[PVCvtNeuronReader](##PVCvtNeuronReader) **A ParaView plugin for loading data directly into ParaView**
+
+(##cvtn)
+**A command line aplication to convert BMTK/neuron simulation data**
 
 The tool can convert neruons with geometry stored in a `seg_coords` folder and
 interpolate time series data stored in a `im.h5` file onto the geometry. In the
@@ -15,10 +20,10 @@ a 3D Cartesian mesh with scalar fields interpolated onto it.
 This project has a CMake build and depnds on HDF5, TBB, and VTK 8.2.0. Newer
 versions of VTK are known to be problematic and will require a rewrite.
 
-## First
+### First
 The dependencies need to be installed.
 
-### VTK
+#### VTK
 After conversion the VTK file format is used to store data back on disk for
 injestion into ParaView for visualization.
 
@@ -33,13 +38,13 @@ make -j
 make -j install
 ```
 
-### HDF5
+#### HDF5
 Any recent version of HDF5 installed by a package manager should suffice.
 
-### Intel TBB
+#### Intel TBB
 A recent version installed from a package manager should suffice.
 
-## Installing the converter
+### Installing the converter
 Once VTK, HDF5, and Intel TBB are installed one can install the converter.
 
 ```
@@ -49,7 +54,7 @@ cmake -DVTK_DIR=../VTK-8.2.0-build/  ../cvtn
 make
 ```
 
-## Using the converter
+### Using the converter
 
 ```
 cvt [input dir] [first neuron] [last neuron] [first step] [last step]
@@ -76,3 +81,59 @@ cvt [input dir] [first neuron] [last neuron] [first step] [last step]
 **write mesh** : 0/1 if 1 sample the scalar field onto a regular Cratesian mesh
 
 **n threads** : number of threads to use (optional)
+
+
+(##PVCvtNeuronReader)
+**A reader plugin for ParaView**
+
+### Installing ParaView
+```bash
+git clone https://gitlab.kitware.com/paraview/paraview.git
+cd paraview
+./Utilities/SetupForDevelopment.sh
+git checkout v5.8.1
+git submodule update --recursive
+cd ..
+mkdir paraview-5.8.1-build
+cd paraview-5.8.1-build
+cmake \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=`pwd`/../paraview-5.8.1-install  \
+    -DVTK_MODULE_USE_EXTERNAL_VTK_hdf5=ON \
+    -DPARAVIEW_USE_PYTHON=ON \
+    -DPARAVIEW_USE_MPI=OFF \
+    ../paraview
+make -j
+make -j install
+```
+### Building the plugin
+```bash
+git clone https://github.com/burlen/cvtn.git
+mkdir cvtn-build
+cd cvtn-build
+cmake \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=`pwd`/../paraview-5.8.1-install  \
+    -DParaView_DIR=`pwd`/../paraview-5.8.1-install/lib64/cmake/paraview-5.8/
+    -DENABLE_PLUGIN=ON \
+    ../cvtn
+
+make -j
+make -j install
+```
+
+### Loading the plugin in ParaView
+Start ParaView open the *Tools->ManagePlugins* dialog box. Click *Load New*
+button, and navigate to the plugin install and loacte and select the
+*PVCvtnNeuronReader.so* file. Once back in the dialog expand the plugin's entry
+and check *Autoload* so that the plugin is loaded when ParaView starts.
+
+### Loadiing data
+The plugin operates on a directory but must be given a file name due to how
+ParaView works. In the top directory of the dataset make an empty file with the
+*.bmtk* file extension.
+```bash
+touch master.bmtk
+```
+When this file is opened in ParaView by the *File->Open* dialog the
+PVCvtnReaderPlugin will be used.

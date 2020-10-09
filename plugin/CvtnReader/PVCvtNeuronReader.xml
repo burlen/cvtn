@@ -1,0 +1,79 @@
+<ServerManagerConfiguration>
+  <ProxyGroup name="sources">
+   <SourceProxy name="PVCvtNeuronReader"
+                class="vtkCvtNeuronReader"
+                label="PVCvtNeuronReader">
+     <Documentation
+       short_help="CvtNeuronReader"
+       long_help="CvtNeuronReader Plugin.">
+     </Documentation>
+     <StringVectorProperty
+        name="FileName"
+        animateable="0"
+        command="SetFileName"
+        number_of_elements="1"
+        panel_visibility="never">
+        <FileListDomain name="files"/>
+        <Documentation>
+          This property specifies the file name for the reader.
+        </Documentation>
+     </StringVectorProperty>
+
+      <IntVectorProperty command="GetNeuronIds"
+                         information_only="1"
+                         name="NeuronIds">
+        <SimpleIntInformationHelper />
+        <Documentation>The number of neurons available in the file as a range [0, n-1]</Documentation>
+      </IntVectorProperty>
+
+      <IntVectorProperty animateable="1"
+                         command="SetReadNeuronIds"
+                         default_values="0 -1"
+                         label="ReadNeuronIds"
+                         name="ReadNeuronIds"
+                         number_of_elements="2">
+        <IntRangeDomain name="ReadNeuronIdsRange">
+          <RequiredProperties>
+            <Property function="Range"
+                      name="NeuronIds" />
+          </RequiredProperties>
+        </IntRangeDomain>
+      </IntVectorProperty>
+
+      <DoubleVectorProperty animateable="1"
+                         command="SetCurrentThreshold"
+                         default_values="0.07"
+                         label="CurrentThreshold"
+                         name="CurrentThreshold"
+                         number_of_elements="1">
+      </DoubleVectorProperty>
+
+      <DoubleVectorProperty animateable="1"
+                         command="SetVoltageThreshold"
+                         default_values="-1e100"
+                         label="VoltageThreshold"
+                         name="VoltageThreshold"
+                         number_of_elements="1">
+      </DoubleVectorProperty>
+
+      <DoubleVectorProperty
+            name="TimeRange"
+                information_only="1" >
+                <TimeRangeInformationHelper/>
+      </DoubleVectorProperty>
+
+      <DoubleVectorProperty
+                name="TimestepValues"
+                information_only="1" >
+                <TimeStepsInformationHelper/>
+      </DoubleVectorProperty>
+
+      <OutputPort name="cells" port_index="0" />
+      <OutputPort name="nodes" port_index="1" />
+
+     <Hints>
+      <ReaderFactory extensions="h5 bmtk" file_description="BMTK HDF5 files" />
+     </Hints>
+   </SourceProxy>
+  </ProxyGroup>
+</ServerManagerConfiguration>

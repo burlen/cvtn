@@ -1,0 +1,10 @@
+NAME
+  PVCvtNeuronReader
+DESCRIPTION
+  Reader plugin for BMTK data
+REQUIRES_MODULES
+  VTK::CommonCore
+  VTK::CommonDataModel
+  VTK::IOCore
+  VTK::IOLegacy
+  VTK::IOParallelXML

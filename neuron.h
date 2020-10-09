@@ -3331,6 +3331,40 @@ struct Exporter
         return 0;
     }
 
+    static
+    int packageCellsAndNodes(
+        std::vector<Neuron<index_t,coord_t,data_t>> *neurons,
+        vtkPolyData *&cds, vtkPolyData *&nds)
+    {
+        index_t nNeuron = neurons->size();
+
+        // package cells as VTK
+        cds = allocCellsVtk<index_t,coord_t,data_t>(
+                (*neurons)[0].scalarName);
+
+        for (int i = 0; i < nNeuron; ++i)
+        {
+            (*neurons)[i].appendCells(cds);
+        }
+
+#if defined(MEM_CHECK)
+        cds->Print(std::cerr);
+#endif
+        // package nodes as VTK
+        nds = allocNodesVtk<index_t,coord_t,data_t>(
+            (*neurons)[0].scalarName);
+
+        for (int i = 0; i < nNeuron; ++i)
+        {
+            (*neurons)[i].appendNodes(nds);
+        };
+
+#if defined(MEM_CHECK)
+        nds->Print(std::cerr);
+#endif
+        return 0;
+    }
+
     int writeMesh(index_t step, index_t nArrays, data_t **arrays, const char **names)
     {
         // package as VTK

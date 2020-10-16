@@ -44,7 +44,7 @@ include_directories(${HDF5_C_INCLUDE_DIRS})
 
 # Intel TBB
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(TBB REQUIRED tbb)
+pkg_check_modules(TBB tbb)
 
 
 set(ENABLE_PLUGIN OFF CACHE BOOL "Builds the ParaView plugin")

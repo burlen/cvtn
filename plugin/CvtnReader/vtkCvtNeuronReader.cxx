@@ -174,6 +174,7 @@ const char *vtkCvtNeuronReader::GetFileName() const
 void vtkCvtNeuronReader::SetFileName(const char *fn)
 {
   std::cerr << " ====  vtkCvtNeuronReader::SetFileName" << std::endl;
+  std::cerr << " ==== " << (fn ? fn : "nullptr") << std::endl;
 
   // ParavIew will call this to pass a file name from the file open dialog.
   // convert the file name to a directory.
@@ -218,6 +219,7 @@ const char *vtkCvtNeuronReader::GetDirectory() const
 void vtkCvtNeuronReader::SetDirectory(const char *dn)
 {
   std::cerr << " ====  vtkCvtNeuronReader::SetDirectory" << std::endl;
+  std::cerr << " ==== " << (dn ? dn : "nullptr") << std::endl;
 
   if (dn && this->Directory && (strcmp(this->Directory, dn) == 0))
     return;
@@ -343,6 +345,16 @@ int vtkCvtNeuronReader::InitializeGeometry(const char *inputDir,
   }
 
   return 0;
+}
+
+//----------------------------------------------------------------------------
+int vtkCvtNeuronReader::FillOutputPortInformation(int port, vtkInformation *info)
+{
+  std::cerr << " ====  vtkCvtNeuronReader::FillOutputPortInformation" << std::endl;
+  std::cerr << " ====  " << port << std::endl;
+
+  info->Set(vtkDataObject::DATA_TYPE_NAME(), "vtkPolyData");
+  return 1;
 }
 
 //----------------------------------------------------------------------------

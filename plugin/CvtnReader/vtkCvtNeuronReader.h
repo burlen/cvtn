@@ -71,6 +71,7 @@ protected:
 
   int RequestData(vtkInformation*, vtkInformationVector**, vtkInformationVector*) override;
   int RequestInformation(vtkInformation*, vtkInformationVector**, vtkInformationVector*) override;
+  int FillOutputPortInformation(int port, vtkInformation *info) override;
 
   // read the range of neurons from disk. this pre-processes the data into a format
   // ammenable to visualization and sets up the time series interpolation routines.

@@ -45,7 +45,6 @@ struct vtkCvtNeuronReader::vtkInternals
   vtkInternals() {}
   ~vtkInternals()
   {
-    std::cerr << " ====  vtkCvtNeuronReader::vtkInternals::~vtkInternals" << std::endl;
     int nNeurons = this->Neurons.size();
     for (int i = 0; i < nNeurons; ++i)
       this->Neurons[i].freeMem();
@@ -67,7 +66,7 @@ vtkCvtNeuronReader::vtkCvtNeuronReader() :
   VoltageThreshold(std::numeric_limits<float>::lowest()),
   Internals(nullptr)
 {
-  std::cerr << " ====  vtkCvtNeuronReader::vtkCvtNeuronReader" << std::endl;
+  std::cerr << " ==== vtkCvtNeuronReader::vtkCvtNeuronReader" << std::endl;
 
   this->SetNumberOfInputPorts(0);
   this->SetNumberOfOutputPorts(2);
@@ -80,20 +79,18 @@ vtkCvtNeuronReader::vtkCvtNeuronReader() :
   // TBB capabilities as well there's probably a VTK API to intialize TBB.
   int nThreads = -1;
   tbb::task_scheduler_init init(nThreads);
-  std::cerr << "initializing TBB with " << nThreads << " threads" << std::endl;
+  std::cerr << " ==== initializing TBB with " << nThreads << " threads" << std::endl;
 }
 
 //----------------------------------------------------------------------------
 vtkCvtNeuronReader::~vtkCvtNeuronReader()
 {
-  std::cerr << " ====  vtkCvtNeuronReader::~vtkCvtNeuronReader" << std::endl;
-  std::cerr << "cleaning up...";
+  std::cerr << " ==== vtkCvtNeuronReader::~vtkCvtNeuronReader" << std::endl;
+  std::cerr << " ==== cleaning up...";
   auto t0 = std::chrono::high_resolution_clock::now();
 
   delete this->Internals;
-  this->Internals = nullptr;
-
-  this->SetDirectory(nullptr);
+  free(this->Directory);
 
   auto t1 = std::chrono::high_resolution_clock::now();
   std::cerr << "done! ("
@@ -173,7 +170,7 @@ const char *vtkCvtNeuronReader::GetFileName() const
 //----------------------------------------------------------------------------
 void vtkCvtNeuronReader::SetFileName(const char *fn)
 {
-  std::cerr << " ====  vtkCvtNeuronReader::SetFileName" << std::endl;
+  std::cerr << " ==== vtkCvtNeuronReader::SetFileName" << std::endl;
   std::cerr << " ==== " << (fn ? fn : "nullptr") << std::endl;
 
   // ParavIew will call this to pass a file name from the file open dialog.
@@ -216,12 +213,12 @@ const char *vtkCvtNeuronReader::GetDirectory() const
 }
 
 //----------------------------------------------------------------------------
-void vtkCvtNeuronReader::SetDirectory(const char *dn)
+void vtkCvtNeuronReader::SetDirectory(const char *dirName)
 {
-  std::cerr << " ====  vtkCvtNeuronReader::SetDirectory" << std::endl;
-  std::cerr << " ==== " << (dn ? dn : "nullptr") << std::endl;
+  std::cerr << " ==== vtkCvtNeuronReader::SetDirectory" << std::endl;
+  std::cerr << " ==== " << (dirName ? dirName : "nullptr") << std::endl;
 
-  if (dn && this->Directory && (strcmp(this->Directory, dn) == 0))
+  if (dirName && this->Directory && (strcmp(this->Directory, dirName) == 0))
     return;
 
   delete this->Internals;
@@ -238,53 +235,36 @@ void vtkCvtNeuronReader::SetDirectory(const char *dn)
 
   this->Modified();
 
-  if (!dn)
+  if (!dirName)
     return;
 
-  std::cerr << "scanning " << dn << "...";
+  std::cerr << " ==== scanning " << dirName << " ... ";
   auto rt0 = std::chrono::high_resolution_clock::now();
 
-  // detevct the available set of neurons. these will be named 0.h5 ... n-1.h5.
-  int fd = -1;
-  char fn[512];
-  do
-  {
-    this->NeuronIds[1] += 1;
-    snprintf(fn, 511, "%s/seg_coords/%d.h5", dn, this->NeuronIds[1]);
-  }
-  while (((fd = open(fn, O_RDONLY)) != -1) && (close(fd) != -1));
 
-  this->NeuronIds[1] -= 1;
-
-  if (this->NeuronIds[1] >= 0)
+  // detect the segment geometry
+  if (neuron::scanForNeurons(dirName, this->NeuronIds[1]))
   {
-    this->HasCoords = 1;
-    this->Directory = strdup(dn);
-  }
-  else
-  {
-    vtkErrorMacro("No neuron geomnetry was found in \"" << dn << "\"");
+    vtkErrorMacro("No neuron geometry was found in \"" << dirName << "\"");
     return;
   }
+  this->HasCoords = 1;
+  this->Directory = strdup(dirName);
 
   // detect the presence of time series data
-  snprintf(fn, 511, "%s/im.h5", dn);
-  if (((fd = open(fn, O_RDONLY)) != -1) && (close(fd) != -1))
-    this->HasData = 1;
-  else
-    this->HasData = 0;
+  this->HasData = neuron::imFileExists(dirName);
 
   auto rt1 = std::chrono::high_resolution_clock::now();
   std::cerr << "done! ("
     << 1.e-6*std::chrono::duration_cast<std::chrono::microseconds>(rt1 - rt0).count()
     << "s)" << std::endl
-    << "found " << this->NeuronIds[1] + 1 << " neurons in " << dn << std::endl;
+    << " ==== found " << this->NeuronIds[1] + 1 << " neurons in " << dirName << std::endl;
 }
 
 //----------------------------------------------------------------------------
 int vtkCvtNeuronReader::CanReadFile()
 {
-  std::cerr << " ====  vtkCvtNeuronReader::CanReadFile" << std::endl;
+  std::cerr << " ==== vtkCvtNeuronReader::CanReadFile" << std::endl;
 
   if (!this->Directory)
   {
@@ -299,11 +279,11 @@ int vtkCvtNeuronReader::CanReadFile()
 int vtkCvtNeuronReader::InitializeGeometry(const char *inputDir,
   int neuron0, int neuron1)
 {
-  std::cerr << " ====  vtkCvtNeuronReader::InitializeGeometry" << std::endl;
+  std::cerr << " ==== vtkCvtNeuronReader::InitializeGeometry" << std::endl;
 
   int nNeuron = neuron1 - neuron0 + 1;
 
-  std::cerr << "importing " << nNeuron << " neurons " << neuron0
+  std::cerr << " ==== importing " << nNeuron << " neurons " << neuron0
     << " to " << neuron1 << " from " << inputDir << " ... ";
   auto rt0 = std::chrono::high_resolution_clock::now();
 
@@ -322,7 +302,7 @@ int vtkCvtNeuronReader::InitializeGeometry(const char *inputDir,
   // initailze time series handlers
   if (this->HasData)
   {
-    std::cerr << "intializing time series, mesher, and exporter...";
+    std::cerr << " ==== intializing time series, mesher, and exporter...";
     rt0 = std::chrono::high_resolution_clock::now();
 
     neuron::TimeSeries<index_t, coord_t, data_t>
@@ -339,7 +319,8 @@ int vtkCvtNeuronReader::InitializeGeometry(const char *inputDir,
     std::cerr << "done! ("
       << 1.e-6*std::chrono::duration_cast<std::chrono::microseconds>(rt1 - rt0).count()
       << "s)" << std::endl;
-    timeSeries.print();
+
+    //timeSeries.print();
 
     this->Internals->TimeSeries.swap(timeSeries);
   }
@@ -350,9 +331,7 @@ int vtkCvtNeuronReader::InitializeGeometry(const char *inputDir,
 //----------------------------------------------------------------------------
 int vtkCvtNeuronReader::FillOutputPortInformation(int port, vtkInformation *info)
 {
-  std::cerr << " ====  vtkCvtNeuronReader::FillOutputPortInformation" << std::endl;
-  std::cerr << " ====  " << port << std::endl;
-
+  std::cerr << " ==== vtkCvtNeuronReader::FillOutputPortInformation" << std::endl;
   info->Set(vtkDataObject::DATA_TYPE_NAME(), "vtkPolyData");
   return 1;
 }
@@ -361,7 +340,7 @@ int vtkCvtNeuronReader::FillOutputPortInformation(int port, vtkInformation *info
 int vtkCvtNeuronReader::RequestData(vtkInformation* vtkNotUsed(request),
   vtkInformationVector** vtkNotUsed(inputVector), vtkInformationVector* outputVector)
 {
-  std::cerr << " ====  vtkCvtNeuronReader::RequestData" << std::endl;
+  std::cerr << " ==== vtkCvtNeuronReader::RequestData" << std::endl;
 
   if (!this->HasCoords)
   {
@@ -401,7 +380,7 @@ int vtkCvtNeuronReader::RequestData(vtkInformation* vtkNotUsed(request),
   double dt = this->Internals->TimeSeries.dt;
   long  timeStep = (timeVal - t0) / dt;
 
-  std::cerr << "processing step " << timeStep << "...";
+  std::cerr << " ==== processing step " << timeStep << " ... ";
   auto rt0 = std::chrono::high_resolution_clock::now();
 
   // update to this time step and interpolate new values to the neurons
@@ -442,7 +421,7 @@ int vtkCvtNeuronReader::RequestData(vtkInformation* vtkNotUsed(request),
 int vtkCvtNeuronReader::RequestInformation(vtkInformation* vtkNotUsed(request),
   vtkInformationVector** vtkNotUsed(inputVector), vtkInformationVector* outputVector)
 {
-  std::cerr << " ====  vtkCvtNeuronReader::RequestInformation" << std::endl;
+  std::cerr << " ==== vtkCvtNeuronReader::RequestInformation" << std::endl;
 
   if (!this->HasCoords)
   {

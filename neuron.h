@@ -95,6 +95,11 @@ extern tbb::queuing_mutex ioMutex;
 // --------------------------------------------------------------------------
 #define EYESNO(_er) (_er == 0 ? "(yes)" : "(no)")
 
+// locate data files
+int imFileExists(const char *dirName);
+int neuronFileExists(const char *dirName, int nid);
+int scanForNeurons(const char *dirName, int &lastId);
+
 // --------------------------------------------------------------------------
 int readNumDimensions(hid_t fh, const char *dsname, int &nDims)
 {

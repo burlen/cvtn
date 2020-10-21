@@ -1,0 +1,74 @@
+<Servers>
+  <Server name="NERSC Cori" resource="csrc://">
+    <CommandStartup>
+      <Options>
+        <Option name="REMOTE_USER" label="user name" save="true">
+          <String default="USER"/>
+        </Option>
+        <Option name="PV_SERVER_PORT" label="tunnel port" save="true">
+          <Range type="int" min="1" max="65535" step="1" default="11111"/>
+        </Option>
+        <Option name="CPU_ARCH" label="CPU Architecture" save="true">
+          <Enumeration default="haswell">
+            <Entry value="haswell" label="haswell"/>
+            <Entry value="knl" label="knl"/>
+          </Enumeration>
+        </Option>
+        <Option name="NCPUS" label="number of processes" save="true">
+          <Range type="int" min="1" max="153216" step="1" default="24"/>
+        </Option>
+        <Option name="NCPUS_PER_SOCKET" label="process per socket" save="true">
+          <Range type="int" min="1" max="16" step="1" default="16"/>
+        </Option>
+        <Option name="WALLTIME" label="job wall time" save="true">
+          <String default="HH:MM:SS"/>
+        </Option>
+        <Option name="ACCOUNT" label="account" save="true">
+          <String default="default"/>
+        </Option>
+        <Option name="QUEUE" label="queue" save="true">
+          <Enumeration default="regular">
+            <Entry value="debug" label="debug"/>
+            <Entry value="regular" label="regular"/>
+            <Entry value="premium" label="premium"/>
+          </Enumeration>
+        </Option>
+        <Option name="BUILD_SPEC" label="build specifier" save="true">
+          <String default="-so"/>
+        </Option>
+        <Option name="SSH_PATH" label="/path/to/ssh" save="true">
+          <File default="/usr/bin/ssh"/>
+        </Option>
+        <Option name="XTERM_PATH" label="/path/to/xterm" save="true">
+          <File default="/usr/bin/xterm"/>
+        </Option>
+        <Option name="XTERM_GEOMETRY" label="xterm geometry" save="true">
+          <File default="150x50"/>
+        </Option>
+      </Options>
+      <Command exec="$XTERM_PATH$" timeout="0" delay="0" Arguments="0">
+        <Arguments>
+          <Argument value="-geometry"/>
+          <Argument value="$XTERM_GEOMETRY$"/>
+          <Argument value="-T"/>
+          <Argument value="ParaView $REMOTE_USER$@cori"/>
+          <Argument value="-e"/>
+          <Argument value="$SSH_PATH$"/>
+          <Argument value="-t"/>
+          <Argument value="-R"/>
+          <Argument value="$PV_SERVER_PORT$:localhost:$PV_SERVER_PORT$"/>
+          <Argument value="$REMOTE_USER$@cori.nersc.gov"/>
+          <Argument value="/usr/common/software/ParaView/start_pvserver.sh"/>
+          <Argument value="$NCPUS$"/>
+          <Argument value="$NCPUS_PER_SOCKET$"/>
+          <Argument value="$CPU_ARCH$"/>
+          <Argument value="$WALLTIME$"/>
+          <Argument value="$ACCOUNT$"/>
+          <Argument value="$QUEUE$"/>
+          <Argument value="$PV_SERVER_PORT$"/>
+          <Argument value="$PV_VERSION_FULL$$BUILD_SPEC$"/>
+        </Arguments>
+      </Command>
+    </CommandStartup>
+  </Server>
+</Servers>

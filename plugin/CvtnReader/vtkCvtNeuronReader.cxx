@@ -332,6 +332,7 @@ int vtkCvtNeuronReader::InitializeGeometry(const char *inputDir,
 int vtkCvtNeuronReader::FillOutputPortInformation(int port, vtkInformation *info)
 {
   std::cerr << " ==== vtkCvtNeuronReader::FillOutputPortInformation" << std::endl;
+  (void)port;
   info->Set(vtkDataObject::DATA_TYPE_NAME(), "vtkPolyData");
   return 1;
 }
@@ -348,12 +349,40 @@ int vtkCvtNeuronReader::RequestData(vtkInformation* vtkNotUsed(request),
     return 0;
   }
 
+  // get the info objects
+  vtkInformation* outInfo0 = outputVector->GetInformationObject(0);
+  vtkInformation* outInfo1 = outputVector->GetInformationObject(1);
+
+  // TODO
+  // get the domain decomp
+  int piece = outInfo0->Get(vtkStreamingDemandDrivenPipeline::UPDATE_PIECE_NUMBER());
+  int numPieces = outInfo0->Get(vtkStreamingDemandDrivenPipeline::UPDATE_NUMBER_OF_PIECES());
+
   // import and cache the neuron geometry, and set up the time series importer
   if (!this->Internals)
   {
     this->Internals = new vtkInternals;
+
+    // this is globaly requested subset across all MPI ranks
     int neuron0 = this->ReadNeuronIds[0] < 0 ? 0 : this->ReadNeuronIds[0];
     int neuron1 = this->ReadNeuronIds[1] < 0 ? this->NeuronIds[1] : this->ReadNeuronIds[1];
+
+    // figure out the subset to load on this rank. piece is the rank and
+    // numPieces is the number of ranks when running MPI parallel.
+    int nTotal = neuron1 - neuron0 + 1;
+    int nLocal = nTotal / numPieces;
+    int nLarge = nTotal % numPieces;
+
+    neuron0 = nLocal * piece;
+    if (piece < nLarge)
+      neuron0 += piece;
+    else
+      neuron0 += nLarge;
+
+    neuron1 = neuron0 + nLocal - 1;
+    if (piece < nLarge)
+      neuron1 += 1;
+
     if (this->InitializeGeometry(this->Directory, neuron0, neuron1))
     {
       vtkErrorMacro("Failed to read the geometry from \"" << this->Directory << "\"");
@@ -362,15 +391,6 @@ int vtkCvtNeuronReader::RequestData(vtkInformation* vtkNotUsed(request),
       return 0;
     }
   }
-
-  // get the info objects
-  vtkInformation* outInfo0 = outputVector->GetInformationObject(0);
-  vtkInformation* outInfo1 = outputVector->GetInformationObject(1);
-
-  // TODO
-  // get the domain decomp
-  /*int piece = outInfo0->Get(vtkStreamingDemandDrivenPipeline::UPDATE_PIECE_NUMBER());
-  int numPieces = outInfo0->Get(vtkStreamingDemandDrivenPipeline::UPDATE_NUMBER_OF_PIECES());*/
 
   // get the requested time value
   double timeVal = outInfo0->Get(vtkStreamingDemandDrivenPipeline::UPDATE_TIME_STEP());
@@ -522,7 +542,7 @@ int vtkCvtNeuronReader::RequestInformation(vtkInformation* vtkNotUsed(request),
   // we have experimented with VTK multiblock data and found that rendering
   // speed is prohibative, so we will stick with the basic poly/unstructured
   // mesh when parallelizing.
-  outInfo->Set(CAN_HANDLE_PIECE_REQUEST(), 0);
+  outInfo->Set(CAN_HANDLE_PIECE_REQUEST(), 1);
 
   outInfo->Set(vtkStreamingDemandDrivenPipeline::TIME_STEPS(),
     timeValues.data(), timeValues.size());

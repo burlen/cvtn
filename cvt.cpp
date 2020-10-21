@@ -54,6 +54,13 @@ int main(int argc, char **argv)
     tbb::task_scheduler_init init(nThreads);
     std::cerr << "initializing with " << nThreads << " threads" << std::endl;
 
+    // scan for files
+    if ((neuron1 < 0) && neuron::scanForNeurons(inputDir, neuron1))
+    {
+        ERROR("Failed to locate neurons in \"" << inputDir << "\"")
+        return -1;
+    }
+
     // import the nerons
     int nNeuron = neuron1 - neuron0 + 1;
 

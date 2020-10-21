@@ -5,5 +5,4 @@ paraview_add_plugin(PVCvtNeuronReader
   MODULES CvtNeuronReader
   MODULE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/CvtnReader/vtk.module"
   REQUIRED_ON_SERVER
-  REQUIRED_ON_CLIENT
   )

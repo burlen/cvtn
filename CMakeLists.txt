@@ -44,14 +44,16 @@ include_directories(${HDF5_C_INCLUDE_DIRS})
 
 # Intel TBB
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(TBB REQUIRED tbb)
+pkg_check_modules(TBB tbb)
 
 
 set(ENABLE_PLUGIN OFF CACHE BOOL "Builds the ParaView plugin")
 
 if (ENABLE_PLUGIN)
     # ParaView 5.8.X or newer
+    find_package(MPI REQUIRED)
     find_package(ParaView REQUIRED)
+
     set(BUILD_SHARED_LIBS ON)
 else()
     # VTK

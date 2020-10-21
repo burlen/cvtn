@@ -65,17 +65,24 @@ public:
   vtkGetMacro(HasCoords, int)
   vtkGetMacro(HasData, int)
 
+  // set the number of TBB threads to use, -1 will result in an automatic
+  // detection. this may be inapropriate when running with MPI.
+  vtkSetMacro(NumberOfThreads, int)
+  vtkGetMacro(NumberOfThreads, int)
+
 protected:
   vtkCvtNeuronReader();
   ~vtkCvtNeuronReader() override;
 
   int RequestData(vtkInformation*, vtkInformationVector**, vtkInformationVector*) override;
   int RequestInformation(vtkInformation*, vtkInformationVector**, vtkInformationVector*) override;
+  int FillOutputPortInformation(int port, vtkInformation *info) override;
 
   // read the range of neurons from disk. this pre-processes the data into a format
   // ammenable to visualization and sets up the time series interpolation routines.
   int InitializeGeometry(const char *inputDir, int neuron0, int neuron1);
 
+  int NumberOfThreads;
   char *Directory;
   int HasCoords;
   int HasData;

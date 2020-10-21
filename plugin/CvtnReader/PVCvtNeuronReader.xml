@@ -29,7 +29,7 @@
       <IntVectorProperty animateable="1"
                          command="SetReadNeuronIds"
                          default_values="0 -1"
-                         label="ReadNeuronIds"
+                         label="Neuron Ids"
                          name="ReadNeuronIds"
                          number_of_elements="2">
         <IntRangeDomain name="ReadNeuronIdsRange">
@@ -43,7 +43,7 @@
       <DoubleVectorProperty animateable="1"
                          command="SetCurrentThreshold"
                          default_values="0.07"
-                         label="CurrentThreshold"
+                         label="I-Threshold"
                          name="CurrentThreshold"
                          number_of_elements="1">
       </DoubleVectorProperty>
@@ -51,10 +51,18 @@
       <DoubleVectorProperty animateable="1"
                          command="SetVoltageThreshold"
                          default_values="-1e100"
-                         label="VoltageThreshold"
+                         label="V-Threshold"
                          name="VoltageThreshold"
                          number_of_elements="1">
       </DoubleVectorProperty>
+
+      <IntVectorProperty animateable="0"
+                         command="SetNumberOfThreads"
+                         default_values="-1"
+                         label="TBB Threads"
+                         name="NumberOfThreads"
+                         number_of_elements="1">
+      </IntVectorProperty>
 
       <DoubleVectorProperty
             name="TimeRange"

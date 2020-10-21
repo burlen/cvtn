@@ -36,24 +36,18 @@
         <Option name="BUILD_SPEC" label="build specifier" save="true">
           <String default="-so"/>
         </Option>
-        <Option name="SSH_PATH" label="/path/to/ssh" save="true">
+        <!-- <Option name="SSH_PATH" label="/path/to/ssh" save="true">
           <File default="/usr/bin/ssh"/>
+        </Option> -->
+        <Option name="XTERM_PATH" label="cori-mac.scpt" save="true">
+          <File default="cori-mac.scpt"/>
         </Option>
-        <Option name="XTERM_PATH" label="/path/to/xterm" save="true">
-          <File default="/usr/bin/xterm"/>
-        </Option>
-        <Option name="XTERM_GEOMETRY" label="xterm geometry" save="true">
-          <File default="150x50"/>
-        </Option>
+        <!-- <Option name="XTERM_GEOMETRY" label="xterm geometry" save="true">
+          <String default="150x50"/>
+        </Option> -->
       </Options>
       <Command exec="$XTERM_PATH$" timeout="0" delay="0" Arguments="0">
         <Arguments>
-          <Argument value="-geometry"/>
-          <Argument value="$XTERM_GEOMETRY$"/>
-          <Argument value="-T"/>
-          <Argument value="ParaView $REMOTE_USER$@cori"/>
-          <Argument value="-e"/>
-          <Argument value="$SSH_PATH$"/>
           <Argument value="-t"/>
           <Argument value="-R"/>
           <Argument value="$PV_SERVER_PORT$:localhost:$PV_SERVER_PORT$"/>

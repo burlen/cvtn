@@ -36,6 +36,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <mpi.h>
+
 using index_t = long;
 using coord_t = float;
 using data_t = float;
@@ -61,7 +63,7 @@ vtkStandardNewMacro(vtkCvtNeuronReader);
 
 //----------------------------------------------------------------------------
 vtkCvtNeuronReader::vtkCvtNeuronReader() :
-  Directory(nullptr), HasCoords(0), HasData(0),
+  NumberOfThreads(-1), Directory(nullptr), HasCoords(0), HasData(0),
   NeuronIds{0,0}, ReadNeuronIds{0,-1}, CurrentThreshold(0.07),
   VoltageThreshold(std::numeric_limits<float>::lowest()),
   Internals(nullptr)
@@ -74,12 +76,6 @@ vtkCvtNeuronReader::vtkCvtNeuronReader() :
   // disable hdf5 error spew. we need to probe the files to see which of
   // the file formats we have in hand.
   //H5Eset_auto2(H5E_DEFAULT, nullptr, nullptr);
-
-  // TODO: this probably isn't the rtight thing to do. since VTK may use
-  // TBB capabilities as well there's probably a VTK API to intialize TBB.
-  int nThreads = -1;
-  tbb::task_scheduler_init init(nThreads);
-  std::cerr << " ==== initializing TBB with " << nThreads << " threads" << std::endl;
 }
 
 //----------------------------------------------------------------------------
@@ -238,27 +234,38 @@ void vtkCvtNeuronReader::SetDirectory(const char *dirName)
   if (!dirName)
     return;
 
-  std::cerr << " ==== scanning " << dirName << " ... ";
-  auto rt0 = std::chrono::high_resolution_clock::now();
-
-
-  // detect the segment geometry
-  if (neuron::scanForNeurons(dirName, this->NeuronIds[1]))
+  // rank 0 scans
+  int rank = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  if (rank == 0)
   {
-    vtkErrorMacro("No neuron geometry was found in \"" << dirName << "\"");
-    return;
+    std::cerr << " ==== scanning " << dirName << " ... ";
+    auto rt0 = std::chrono::high_resolution_clock::now();
+
+    // detect the segment geometry
+    if (neuron::scanForNeurons(dirName, this->NeuronIds[1]))
+    {
+      vtkErrorMacro("No neuron geometry was found in \"" << dirName << "\"");
+      return;
+    }
+    this->HasCoords = 1;
+
+    // detect the presence of time series data
+    this->HasData = neuron::imFileExists(dirName);
+
+    auto rt1 = std::chrono::high_resolution_clock::now();
+    std::cerr << "done! ("
+      << 1.e-6*std::chrono::duration_cast<std::chrono::microseconds>(rt1 - rt0).count()
+      << "s)" << std::endl
+      << " ==== found " << this->NeuronIds[1] + 1 << " neurons in " << dirName << std::endl;
   }
-  this->HasCoords = 1;
+
   this->Directory = strdup(dirName);
 
-  // detect the presence of time series data
-  this->HasData = neuron::imFileExists(dirName);
-
-  auto rt1 = std::chrono::high_resolution_clock::now();
-  std::cerr << "done! ("
-    << 1.e-6*std::chrono::duration_cast<std::chrono::microseconds>(rt1 - rt0).count()
-    << "s)" << std::endl
-    << " ==== found " << this->NeuronIds[1] + 1 << " neurons in " << dirName << std::endl;
+  // other ranks receive results without touching the disk.
+  MPI_Bcast(this->NeuronIds, 2, MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&this->HasCoords, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&this->HasData, 1, MPI_INT, 0, MPI_COMM_WORLD);
 }
 
 //----------------------------------------------------------------------------
@@ -361,6 +368,12 @@ int vtkCvtNeuronReader::RequestData(vtkInformation* vtkNotUsed(request),
   // import and cache the neuron geometry, and set up the time series importer
   if (!this->Internals)
   {
+    // TODO: this probably isn't the rtight thing to do. since VTK may use
+    // TBB capabilities as well, there's probably a VTK API to intialize TBB.
+    tbb::task_scheduler_init init(this->NumberOfThreads);
+    std::cerr << " ==== initializing TBB with " << this->NumberOfThreads
+        << " threads" << std::endl;
+
     this->Internals = new vtkInternals;
 
     // this is globaly requested subset across all MPI ranks
@@ -453,71 +466,86 @@ int vtkCvtNeuronReader::RequestInformation(vtkInformation* vtkNotUsed(request),
 
   if (this->HasData)
   {
-    // extract only the time series info. the converter code does this
-    // with a bunch of allocations and initializations that should be
-    // deffered, so re-implement that code here.
-    hid_t fh = -1;
+    double t0 = 0.0;
+    double dt = 0.0;
+    int nSteps = 0;
 
-    char fn[256];
-    snprintf(fn, 256, "%s/im.h5", this->Directory);
-
-    fh = H5Fopen(fn, H5F_ACC_RDONLY, H5P_DEFAULT);
-    if (fh < 0)
+    // rank 0 scans
+    int rank = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (rank == 0)
     {
-      H5Eprint1(stderr);
-      vtkErrorMacro("Failed to open " << fn);
-      return 0;
-    }
+      // extract only the time series info. the converter code does this
+      // with a bunch of allocations and initializations that should be
+      // deffered, so re-implement that code here.
+      hid_t fh = -1;
 
-    // read time metadata
-    hsize_t dims[2] = {0};
-    data_t tmd[3] = {data_t(0)};
-    if (neuron::readDimensions(fh, "/mapping/time", dims, 1, 3) ||
-        neuron::cppH5Tt<data_t>::readDataset(fh, "/mapping/time", tmd))
-    {
-      vtkErrorMacro("Failed to read time metadata");
+      char fn[256];
+      snprintf(fn, 256, "%s/im.h5", this->Directory);
+
+      fh = H5Fopen(fn, H5F_ACC_RDONLY, H5P_DEFAULT);
+      if (fh < 0)
+      {
+        H5Eprint1(stderr);
+        vtkErrorMacro("Failed to open " << fn);
+        return 0;
+      }
+
+      // read time metadata
+      hsize_t dims[2] = {0};
+      data_t tmd[3] = {data_t(0)};
+      if (neuron::readDimensions(fh, "/mapping/time", dims, 1, 3) ||
+          neuron::cppH5Tt<data_t>::readDataset(fh, "/mapping/time", tmd))
+      {
+        vtkErrorMacro("Failed to read time metadata");
+        H5Fclose(fh);
+        return 0;
+      }
+
+      t0 = tmd[0];
+      //t1 = tmd[1];
+      dt = tmd[2];
+
+      // attempt to detect the file format. Vyassa's using the bmtk code
+      // and we need to attempt to work through a number of cases depending on
+      // what that code has done.
+      int nDims = 0;
+      const char *dsetName = nullptr;
+      if (neuron::readNumDimensions(fh, "/data", nDims) == 0)
+      {
+        dsetName = "/data";
+      }
+      else if ((neuron::readNumDimensions(fh, "/im/data", nDims) == 0) &&
+        (neuron::readNumDimensions(fh, "/v/data", nDims) == 0))
+      {
+        dsetName = "/im/data";
+
+      }
+      else
+      {
+        vtkErrorMacro("Failed to detect file format. Expected either \"/data\" "
+          "or \"/data/im\" and \"/data/v\"");
+        H5Fclose(fh);
+        return 0;
+      }
+
+      // get size of buffers for time series
+      if (neuron::readDimensions(fh, dsetName, dims, nDims))
+      {
+        H5Fclose(fh);
+        return 0;
+      }
+
       H5Fclose(fh);
-      return 0;
+
+      nSteps = dims[0];
+      //long stepSize = dims[1];
     }
 
-    double t0 = tmd[0];
-    //double t1 = tmd[1];
-    double dt = tmd[2];
-
-    // attempt to detect the file format. Vyassa's using the bmtk code
-    // and we need to attempt to work through a number of cases depending on
-    // what that code has done.
-    int nDims = 0;
-    const char *dsetName = nullptr;
-    if (neuron::readNumDimensions(fh, "/data", nDims) == 0)
-    {
-      dsetName = "/data";
-    }
-    else if ((neuron::readNumDimensions(fh, "/im/data", nDims) == 0) &&
-      (neuron::readNumDimensions(fh, "/v/data", nDims) == 0))
-    {
-      dsetName = "/im/data";
-
-    }
-    else
-    {
-      vtkErrorMacro("Failed to detect file format. Expected either \"/data\" "
-        "or \"/data/im\" and \"/data/v\"");
-      H5Fclose(fh);
-      return 0;
-    }
-
-    // get size of buffers for time series
-    if (neuron::readDimensions(fh, dsetName, dims, nDims))
-    {
-      H5Fclose(fh);
-      return 0;
-    }
-
-    H5Fclose(fh);
-
-    long nSteps = dims[0];
-    //long stepSize = dims[1];
+    // all others receive the data without touching the disk
+    MPI_Bcast(&t0, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&dt, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&nSteps, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     // construct and share an explicit list of time values for VTK.
     // as far as I know this is required even though we have a uniform time

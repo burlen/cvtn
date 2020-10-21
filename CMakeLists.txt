@@ -51,7 +51,9 @@ set(ENABLE_PLUGIN OFF CACHE BOOL "Builds the ParaView plugin")
 
 if (ENABLE_PLUGIN)
     # ParaView 5.8.X or newer
+    find_package(MPI REQUIRED)
     find_package(ParaView REQUIRED)
+
     set(BUILD_SHARED_LIBS ON)
 else()
     # VTK

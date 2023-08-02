@@ -19,12 +19,12 @@ If only building the command line converter, then VTK is required.
 
 A typical VTK build might be acheived as follows:
 ```
-wget https://www.vtk.org/files/release/8.2/VTK-8.2.0.tar.gz
+wget https://www.vtk.org/files/release/9.0/VTK-9.0.0.tar.gz
 tar xzfv VTK-9.0.0.tar.gz
 mkdir VTK-9.0.0-build
 cd VTK-9.0.0-build/
 cmake \
-    -DCMAKE_INSTALL_PREFIX=../VTK-8.2.0-install \
+    -DCMAKE_INSTALL_PREFIX=../VTK-9.0.0-install \
     -DVTK_MODULE_USE_EXTERNAL_VTK_hdf5=ON \
     ../VTK-9.0.0
 make -j
@@ -84,7 +84,7 @@ Once VTK, HDF5, and Intel TBB are installed one can install the converter.
 ```
 git clone git@github.com:burlen/cvtn.git
 mkdir cvtn-build
-cmake -DVTK_DIR=../VTK-8.2.0-build/  ../cvtn
+cmake -DVTK_DIR=../VTK-9.0.0-build/  ../cvtn
 make
 ```
 

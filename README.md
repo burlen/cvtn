@@ -73,9 +73,7 @@ each coordinate in each neuron at each time point.
 The converter can generate 2 types of geometry, the neurons themselves or
 a 3D Cartesian mesh with scalar fields interpolated onto it.
 
-This project has a CMake build and depnds on HDF5, TBB, and VTK 8.2.0. Newer
-versions of VTK are known to be problematic and will require a rewrite.
-
+This project has a CMake build and depnds on HDF5, TBB, and VTK >= 9.0.0.
 
 
 ### Installing the converter
